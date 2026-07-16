@@ -1,0 +1,10 @@
+services:
+  db:
+    container_name: NLP-Vector-DB
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: iseg
+      POSTGRES_DB: iseg
+    ports:
+      - "5432:5432"
