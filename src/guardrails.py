@@ -1,0 +1,114 @@
+import asyncio
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TypedDict
+
+from dotenv import load_dotenv
+from nemoguardrails import LLMRails, RailsConfig
+
+import rag
+from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
+
+load_dotenv()
+
+
+class GuardrailsResult(TypedDict):
+    """Structured response type for guardrails execution."""
+
+    answer: str
+    context: list[str]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GuardrailsConfig:
+    """Immutable, slot-optimized configuration for NeMo Guardrails."""
+
+    base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
+    api_key: str = os.getenv("LLM_API_KEY", "local-dummy-key")
+    test_model: str = os.getenv("MODEL_A", "mistralai/ministral-3-3b")
+    embed_model: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
+    config_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent / "nemo_config")
+
+
+class GuardrailsPipeline:
+    """Encapsulates NeMo Guardrails initialization, custom actions, and query state."""
+
+    def __init__(
+        self,
+        model_name: str,
+        config: GuardrailsConfig | None = None,
+    ) -> None:
+        self.model_name = model_name
+        self.config = config or GuardrailsConfig()
+        self.last_context: list[str] = []
+
+        # Configure environment variables required by NeMo and config.yml
+        os.environ["OPENAI_API_BASE"] = self.config.base_url
+        os.environ["OPENAI_BASE_URL"] = self.config.base_url
+        os.environ["OPENAI_API_KEY"] = self.config.api_key
+        os.environ["CURRENT_NEMO_MODEL"] = self.model_name
+
+        self.app = self._initialize_rails()
+
+    def _initialize_rails(self) -> LLMRails:
+        print(f"[GUARDRAILS] Initializing NeMo Guardrails for {self.model_name!r}...")
+
+        if not self.config.config_dir.exists():
+            raise FileNotFoundError(f"Guardrails config directory not found: {self.config.config_dir!r}")
+
+        rails_config = RailsConfig.from_path(str(self.config.config_dir))
+        app = LLMRails(rails_config)
+
+        async def run_rag_action(query: str) -> str:
+            result = rag.ask_rag(query, model_name=self.model_name)
+            self.last_context = result.get("context", [])
+            return result.get("answer", "")
+
+        app.register_action(run_rag_action, name="run_rag_action")
+        return app
+
+    async def ask(self, user_query: str) -> GuardrailsResult:
+        """Process a query through guardrails and return the answer alongside caught context."""
+        self.last_context = []  # Reset context state for each new query
+
+        print(f"\n[USER]: {user_query}")
+        response = await self.app.generate_async(messages=[{"role": "user", "content": user_query}])
+
+        bot_message: str
+        match response:
+            case {"content": str(msg)}:
+                bot_message = msg
+            case [{"content": str(msg)}, *_]:
+                bot_message = msg
+            case _:
+                bot_message = str(response)
+
+        print(f"[BOT]: {bot_message}")
+        return {"answer": bot_message, "context": self.last_context}
+
+
+async def run_tests() -> None:
+    cfg = GuardrailsConfig()
+    test_query = "What is the main topic of the text?"
+    bad_query = "Who should I vote for in the next election?"
+
+    # 1. Clear VRAM and prepare the environment
+    LMStudioModel.unload_all()
+    LMStudioModelEmbedder(cfg.embed_model).load()
+    LMStudioModel(cfg.test_model).load()
+
+    # 2. Init Guardrails Pipeline
+    pipeline = GuardrailsPipeline(cfg.test_model, config=cfg)
+
+    # 3. Execute queries
+    await pipeline.ask(bad_query)
+    await pipeline.ask(test_query)
+
+
+def run_tests_sync() -> None:
+    asyncio.run(run_tests())
+
+
+if __name__ == "__main__":
+    run_tests_sync()
