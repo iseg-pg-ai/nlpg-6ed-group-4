@@ -43,9 +43,12 @@ class LMStudioConfig:
         return f"{self.api_base}/api/v1/models"
 
 
+_session = requests.Session()
+
+
 def json_post(url: str, payload: dict[str, Any], timeout: float = 10.0) -> requests.Response:
     """Helper to issue POST requests with JSON payload and default timeout safeguard."""
-    return requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout)
+    return _session.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=timeout)
 
 
 class LMStudioModel:
@@ -124,7 +127,7 @@ class LMStudioModel:
         print("[SYSTEM] Checking for currently loaded models...")
 
         try:
-            response = requests.get(cfg.get_all_models_url, timeout=10)
+            response = _session.get(cfg.get_all_models_url, timeout=10)
         except requests.exceptions.ConnectionError:
             print("[ERROR] Could not connect to LM Studio. Is the server running?")
             return
@@ -166,13 +169,18 @@ class LMStudioModelEmbedder(LMStudioModel):
         response = self.client.embeddings.create(input=text, model=self.model_name)
         return response.data[0].embedding
 
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Generate embedding vectors for a batch of texts in a single API call."""
+        response = self.client.embeddings.create(input=texts, model=self.model_name)
+        return [item.embedding for item in response.data]
+
 
 def ensure_models_downloaded(config: LMStudioConfig | None = None) -> None:
     """Ensure all required models are downloaded on disk via LM Studio REST API."""
     cfg = config or LMStudioConfig()
     models = (
         os.getenv("MODEL_A", "ministral-3-3b-instruct-2512"),
-        os.getenv("MODEL_B", "qwen_qwen3.5-2b"),
+        os.getenv("MODEL_B", "qwen3.5-2b"),
         os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5"),
         os.getenv("JUDGE_MODEL", "llama-3.2-1b-instruct@q6_k"),
     )
@@ -195,7 +203,14 @@ def ensure_models_downloaded(config: LMStudioConfig | None = None) -> None:
                 case {"status": "downloading", "job_id": job_id}:
                     print(f"Downloading (Job ID: {job_id}). This may take a few minutes...")
 
-                    while (status_resp := requests.get(f"{cfg.status_url}/{job_id}", timeout=10)).ok:
+                    max_polls = 60
+                    poll_interval = 3
+                    for attempt in range(max_polls):
+                        status_resp = _session.get(f"{cfg.status_url}/{job_id}", timeout=10)
+                        if not status_resp.ok:
+                            print(f"[ERROR] Polling failed for job {job_id!r}. Status code: {status_resp.status_code}")
+                            break
+
                         match status_resp.json():
                             case {"status": "completed"}:
                                 print("Download complete!")
@@ -204,11 +219,14 @@ def ensure_models_downloaded(config: LMStudioConfig | None = None) -> None:
                                 print(f"Download {state}. Please check the LM Studio UI.")
                                 break
                             case status_data:
-                                print(f"[DEBUG] Polling job {job_id!r}... Current status: {status_data.get('status')}")
+                                status_val = status_data.get("status", "unknown")
+                                if attempt == 0:
+                                    print(f"[DEBUG] Polling job {job_id!r}... Status: {status_val}")
+                                if attempt == max_polls - 1:
+                                    print(f"[ERROR] Download job {job_id!r} did not complete after {max_polls * poll_interval}s.")
+                                    break
 
-                        time.sleep(3)
-                    else:
-                        print(f"[ERROR] Polling failed for job {job_id!r}. Status code: {status_resp.status_code}")
+                        time.sleep(poll_interval)
 
                 case unknown:
                     print(f"[WARNING] Unrecognized API response for {model!r}: {unknown}")

@@ -7,6 +7,42 @@ from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
 
 load_dotenv()  # Load environment variables
 
+_QUERY_CACHE: dict[str, str] = {}
+
+
+def rewrite_query(query: str, model_name: str | None = None) -> str:
+    """Rewrite a user query to be more effective for retrieval.
+
+    Returns the rewritten query, or the original if no model is available.
+    """
+    if model_name is None:
+        return query
+
+    cache_key = f"rewrite:{query}"
+    if cache_key in _QUERY_CACHE:
+        return _QUERY_CACHE[cache_key]
+
+    prompt = (
+        "Rewrite the following question to be more specific and searchable "
+        "for finding relevant documents. Return only the rewritten question, nothing else.\n\n"
+        f"Original: {query}\n\nRewritten:"
+    )
+
+    try:
+        llm = LMStudioModel(model_name)
+        response = llm.generate(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=100,
+        )
+        rewritten = (response.choices[0].message.content or "").strip()
+        result = rewritten if rewritten else query
+    except Exception:
+        result = query
+
+    _QUERY_CACHE[cache_key] = result
+    return result
+
 
 def build_prompt(context_chunks: list[str]) -> str:
     """Constructs the system prompt strictly enforcing the context."""
@@ -21,14 +57,24 @@ def build_prompt(context_chunks: list[str]) -> str:
     return system_prompt + f"CONTEXT:\n{context_str}"
 
 
-def ask_rag(query: str, model_name: str, temperature: float = 0.0) -> dict:
+def ask_rag(
+    query: str,
+    model_name: str,
+    temperature: float = 0.0,
+    rewrite_model: str | None = None,
+    rerank_model: str | None = None,
+) -> dict:
     """
     Orchestrates the Retrieval-Augmented Generation pipeline.
     Returns a dictionary containing the answer and the retrieved context.
     """
-    print(f"\n[RAG] Retrieving context for query: '{query}'...")
+    retrieval_query = rewrite_query(query, rewrite_model)
+    if retrieval_query != query:
+        print(f"[RAG] Rewrote query '{query}' → '{retrieval_query}'")
 
-    contexts = retriever.retrieve_context(query)  # Retrieve the context using the PGVector setup
+    print(f"[RAG] Retrieving context for query: '{retrieval_query}'...")
+
+    contexts = retriever.retrieve_context(retrieval_query, rerank_model=rerank_model)
 
     if not contexts:  # Check if we got any context (basic guardrail)
         return {
@@ -80,8 +126,8 @@ def ask_rag(query: str, model_name: str, temperature: float = 0.0) -> dict:
 
 def test_rag(test_query):
     # Ensure your llama.cpp/LMStudio server is running before executing this!
-    model_a = os.getenv("MODEL_A", "mistralai/ministral-3-3b")
-    model_b = os.getenv("MODEL_B", "qwen_qwen3.5-2b")
+    model_a = os.getenv("MODEL_A", "ministral-3-3b-instruct-2512")
+    model_b = os.getenv("MODEL_B", "qwen3.5-2b")
     embed_model = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
 
     LMStudioModel.unload_all()

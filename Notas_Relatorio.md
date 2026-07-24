@@ -15,6 +15,9 @@
 - Escolhemos o PostgreSQL com a extensão pgvector porque, além de aparecer na grelha de comparação da **Apresentação 5, Slide 24**, a tecnologia reflete uma verdadeira arquitetura de nivel *enterprise*, em vez de ser uma ferramenta de prototipagem. 
 - Enquanto bases de dados como o Chroma serviriam perfeitamente para testes locais, o Postgres permite-nos armazenar embeddings de alta dimensão nativamente, lado a lado com dados relacionais estruturados, num único sistema robusto e compatível com *ACID* (Atomicidade, Consistência, Isolamento e Durabilidade).
 - Isto garante que a nossa recuperação vetorial é altamente escalável, segura e pronta para produção sem exigir uma migração arquitetural complexa mais tarde.
+- **Connection Pooling e Async**:
+    - Para simular um ambiente de produção (*Enterprise*), substituímos conexões isoladas por *Connection Pooling* e isolámos as chamadas da API usando *Thread Pools* (`asyncio.to_thread`). 
+    - Desta forma, o nosso servidor não bloqueia o *Event Loop* principal durante chamadas síncronas pesadas aos modelos, permitindo que a arquitetura escale para múltiplos utilizadores concorrentes sem falhas de I/O ou estrangulamento de portas de rede.
 
 **Sobre o uso de NeMo Guardrails sobre system prompts classicos para enforcemente de guardrails e o efeito na latencia**
 - Os prompts de sistema são vulneráveis a *jailbreaks* e falham frequentemente na aplicação de restrições negativas. O *NeMo Guardrails* resolve isto ao intercetar entradas programaticamente através de regras em *Colang* e correspondência de intenções semânticas, bloqueando de forma **determinística** tópicos restritos antes que estes cheguem ao LLM principal.
@@ -24,10 +27,21 @@
 - Escolhemos o nomic-embed-text-v1.5 porque supera dramaticamente modelos mais antigos como o all-MiniLM-L6-v2 em arquiteturas RAG modernas. Enquanto o MiniLM está limitado a uma janela de contexto de 256 tokens, o Nomic suporta até 8192 tokens, evitando perdas críticas de dados durante a ingestão. 
 - Além disso, os seus vetores de 768 dimensões capturam uma representação semântica significativamente mais rica do texto. Esta maior dimensionalidade melhora drasticamente a precisão das nossas procuras por similaridade de cosseno no PGVector à escala.
 
-**Sobre a escolha de chunking no ingest.py (especificamente `yield text[start : start + chunk_size]`) (Há coisas sobre isto na Apresentação 5, Slide 18)**
+**Sobre o Chunking Baseado em Frases (Sentence-Based Chunking):**
 - Para evitar introduzir bibliotecas pesadas de tokenização como o *tiktoken* na nossa pipeline de ingestão, implementámos um chunker de carateres baseado em sliding-window, o standard da industria, implementado em frameworks como ***LangChain***. 
 - O nosso tamanho de chunk de 500 carateres (aprox. 130 tokens) garante uma recuperação de contexto hiperfocada e densa, enquanto previne o overflow de KV cache durante a geração do LLM.
+- Evoluímos a nossa estratégia de ingestão para **"Sentence-Based Chunking" (Apresentação 5, Slide 18)** através de expressões regulares (Regex). 
+- O *slicing* matemático simples corre o risco de cortar palavras a meio, o que destrói a integridade do *embedding* e confunde o modelo de recuperação. Ao forçar o corte nas pontuações de final de frase, garantimos que a integridade semântica de cada vetor se mantém intacta e biologicamente legível para a máquina.
 
 **Porquê um chunk size de 500 com overlap de 50?** (Apresentação 5, Slides 12 e 13)
 - Um tamanho de chunk de 500 tokens com um overlap de 50 tokens garante o equilíbrio ideal entre riqueza de contexto e precisão. Este tamanho encapsula, regra geral, um parágrafo completo ou uma ideia coesa. Se os chunks forem demasiado pequenos, perdem significado semântico, fazendo com que o LLM não tenha contexto suficiente para responder.
 - Se forem demasiado grandes, arriscamo-nos à "diluição de atenção", onde o LLM se distrai com texto irrelevante, aumentando simultaneamente o consumo de VRAM e desacelerando a inferência.
+
+**Sobre a Estratégia de 2-Stage Retrieval e Reranking:**
+- Implementámos uma arquitetura de recuperação em duas fases (2-Stage Retrieval), como ilustrado na **Apresentação 5, Slide 22**. 
+- Numa primeira fase, recuperamos um número alargado de documentos. De seguida, utilizamos um modelo LLM focado em re-ranking para reavaliar e reordenar os chunks (mencionado na **Apresentação 5, Slide 21**). Isto garante que o LLM final recebe apenas os chunks com maior densidade de informação relevante, mitigando a "diluição de atenção" e aumentando drasticamente a precisão da resposta.
+
+**Sobre a Indexação Vetorial (IVFFlat) e Pesquisa Híbrida (Hybrid Search):**
+- De acordo com as boas práticas listadas na **Apresentação 5, Slide 18**, aplicámos um índice **IVF (Inverted File Index)** na nossa base de dados. Em vez de forçar *Full Table Scans* lentos e exaustivos, o IVF agrupa vetores, reduzindo significativamente o custo computacional da recuperação.
+- Adicionalmente, implementámos *Hybrid Search* (pesquisa semântica por cosseno + Full-Text Search via GIN index). Unimos os dois através do algoritmo RRF (Reciprocal Rank Fusion). Isto resolve o clássico problema do RAG onde a pesquisa semântica perde correspondências exatas de palavras-chave (ex: nomes próprios ou IDs).
+

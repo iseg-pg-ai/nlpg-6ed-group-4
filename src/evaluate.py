@@ -32,9 +32,9 @@ class EvalConfig:
     """Immutable, slot-optimized configuration for the evaluation pipeline."""
 
     tracking_uri: str = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
-    model_a: str = os.getenv("MODEL_A", "mistralai/ministral-3-3b")
-    model_b: str = os.getenv("MODEL_B", "qwen_qwen3.5-2b")
-    judge_model: str = os.getenv("JUDGE_MODEL", "bartowski/Llama-3.2-1B-Instruct-GGUF")
+    model_a: str = os.getenv("MODEL_A", "ministral-3-3b-instruct-2512")
+    model_b: str = os.getenv("MODEL_B", "qwen3.5-2b")
+    judge_model: str = os.getenv("JUDGE_MODEL", "llama-3.2-1b-instruct@q6_k")
     embedding_model: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
     temperatures: tuple[float, ...] = (0.0, 0.5)
     experiment_name: str = "NLPG_RAG_Evaluation"

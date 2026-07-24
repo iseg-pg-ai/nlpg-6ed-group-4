@@ -1,4 +1,5 @@
 import os
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,8 @@ from helpers.lm_studio_utils import LMStudioModelEmbedder
 
 load_dotenv()  # Load environment variables
 
+_SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(])")
+
 
 @dataclass(frozen=True, slots=True)
 class IngestConfig:
@@ -24,17 +27,46 @@ class IngestConfig:
 
 
 def chunk_text(text: str, chunk_size: int, overlap: int) -> Iterator[str]:
-    """Generator yielding sliding-window text chunks with overlap."""
+    """Split text into sentence-aligned chunks with overlap.
+
+    Each chunk contains only whole sentences, never truncated mid-word.
+    """
     if overlap >= chunk_size:
         raise ValueError("chunk_overlap must be strictly less than chunk_size")
 
-    step = chunk_size - overlap
-    start = 0
-    text_len = len(text)
+    sentences = _SENTENCE_PATTERN.split(text.replace("\n", " "))
+    sentences = [s.strip() for s in sentences if s.strip()]
 
-    while start < text_len:
-        yield text[start : start + chunk_size]
-        start += step
+    if not sentences:
+        return
+
+    pending: list[str] = []
+    pending_len = 0
+
+    for sentence in sentences:
+        sentence_len = len(sentence) + 1
+
+        if pending and pending_len + sentence_len > chunk_size:
+            yield " ".join(pending)
+
+            # Build overlap from trailing sentences of the yielded chunk
+            overlap_buf: list[str] = []
+            overlap_chars = 0
+            for s in reversed(pending):
+                s_len = len(s) + 1
+                if overlap_chars + s_len > overlap:
+                    break
+                overlap_buf.insert(0, s)
+                overlap_chars += s_len
+
+            pending = overlap_buf
+            pending_len = overlap_chars
+
+        pending.append(sentence)
+        pending_len += sentence_len
+
+    if pending:
+        yield " ".join(pending)
 
 
 def extract_text_from_pdf(file_path: Path) -> str:
@@ -103,14 +135,13 @@ def run_ingestion(reset_db: bool = True, config: IngestConfig | None = None) -> 
                     print(f"[WARNING] No readable text found in {file_name!r}. Skipping.")
                     continue
 
-                # Filter empty segments from chunk generator
                 chunks = [c for c in chunk_text(text, cfg.chunk_size, cfg.chunk_overlap) if c.strip()]
 
                 if not chunks:
                     continue
 
-                # Batch insert chunk embeddings into PostgreSQL
-                records = [(file_name, chunk, embedder.embed(chunk)) for chunk in chunks]
+                embeddings = embedder.embed_batch(chunks)
+                records = [(file_name, chunk, emb) for chunk, emb in zip(chunks, embeddings)]
                 db.insert_chunks_batch(cur, records)
 
             conn.commit()

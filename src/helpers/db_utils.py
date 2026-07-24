@@ -1,5 +1,7 @@
+import atexit
 import os
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Final, Self
 
@@ -7,10 +9,41 @@ import psycopg
 from dotenv import load_dotenv
 from pgvector.psycopg import register_vector
 from psycopg import sql
+from psycopg_pool import ConnectionPool
 
 load_dotenv()
 
 type Vector = Sequence[float] | list[float]  # PEP 695 Native Type Alias (Python 3.12+)
+
+_pool: ConnectionPool | None = None
+
+
+def _close_pool() -> None:
+    global _pool
+    if _pool is not None:
+        _pool.close()
+        _pool = None
+
+
+atexit.register(_close_pool)
+
+
+def _get_pool() -> ConnectionPool:
+    global _pool
+    if _pool is None:
+        cfg = DatabaseConfig.from_env()
+        with psycopg.connect(cfg.conninfo, autocommit=True) as tmp_conn:
+            with tmp_conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        _pool = ConnectionPool(
+            cfg.conninfo,
+            min_size=1,
+            max_size=4,
+            open=True,
+            configure=lambda conn: register_vector(conn),
+            kwargs={"autocommit": False},
+        )
+    return _pool
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,21 +97,54 @@ SELECT EXISTS(
 );
 """
 
-SEARCH_SQL: Final = """
-SELECT content 
-FROM document_chunks 
-ORDER BY embedding <=> %s::vector 
+CREATE_INDEX_SQL: Final = """
+CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding
+ON document_chunks
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+"""
+
+ADD_TSVECTOR_SQL: Final = """
+ALTER TABLE document_chunks
+ADD COLUMN IF NOT EXISTS content_tsv tsvector
+GENERATED ALWAYS AS (to_tsvector('english', content)) STORED;
+"""
+
+CREATE_FTS_INDEX_SQL: Final = """
+CREATE INDEX IF NOT EXISTS idx_document_chunks_fts
+ON document_chunks
+USING GIN (content_tsv);
+"""
+
+SEARCH_VECTOR_SQL: Final = """
+SELECT content, embedding <=> %s::vector AS distance
+FROM document_chunks
+ORDER BY embedding <=> %s::vector
+LIMIT %s;
+"""
+
+SEARCH_FTS_SQL: Final = """
+SELECT content, ts_rank(content_tsv, plainto_tsquery('english', %s)) AS score
+FROM document_chunks
+WHERE content_tsv @@ plainto_tsquery('english', %s)
+ORDER BY score DESC
 LIMIT %s;
 """
 
 
-def get_db_connection(config: DatabaseConfig | None = None) -> psycopg.Connection:
-    """Establish a connection to the PostgreSQL database using psycopg v3."""
-    cfg = config or DatabaseConfig.from_env()
-    conn = psycopg.connect(cfg.conninfo, autocommit=False)
-    register_vector(conn)
-
-    return conn
+@contextmanager
+def get_db_connection(config: DatabaseConfig | None = None) -> Iterator[psycopg.Connection]:
+    """Borrow a connection from the pool."""
+    if config is not None:
+        conn = psycopg.connect(config.conninfo)
+        register_vector(conn)
+        try:
+            yield conn
+        finally:
+            conn.close()
+    else:
+        with _get_pool().connection() as conn:
+            yield conn
 
 
 def setup_database(conn: psycopg.Connection, vector_dim: int | None = None) -> None:
@@ -87,9 +153,11 @@ def setup_database(conn: psycopg.Connection, vector_dim: int | None = None) -> N
 
     with conn.cursor() as cur:
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        # Safe query composition for table attributes
         query = sql.SQL(CREATE_TABLE_SQL).format(dim=sql.Literal(dim))
         cur.execute(query)
+        cur.execute(CREATE_INDEX_SQL)
+        cur.execute(ADD_TSVECTOR_SQL)
+        cur.execute(CREATE_FTS_INDEX_SQL)
 
     conn.commit()
     print("[SYSTEM] Database schema ensured.")
@@ -114,10 +182,41 @@ def insert_chunks_batch(cur: psycopg.Cursor, records: Sequence[tuple[str, str, V
     cur.executemany(INSERT_SQL, records)
 
 
-def search_chunks(cur: psycopg.Cursor, query_embedding: Vector, top_k: int) -> list[str]:
-    """Perform a cosine distance search (`<=>`) and return top_k chunk contents."""
-    cur.execute(SEARCH_SQL, (query_embedding, top_k))
-    return [row[0] for row in cur.fetchall()]
+def search_chunks_vector(cur: psycopg.Cursor, query_embedding: Vector, top_k: int) -> list[tuple[str, float]]:
+    """Perform a cosine distance search (`<=>`) and return (content, distance) pairs."""
+    cur.execute(SEARCH_VECTOR_SQL, (query_embedding, query_embedding, top_k))
+    return [(row[0], row[1]) for row in cur.fetchall()]
+
+
+def search_chunks_fts(cur: psycopg.Cursor, query_text: str, top_k: int) -> list[tuple[str, float]]:
+    """Perform a full-text search and return (content, score) pairs."""
+    cur.execute(SEARCH_FTS_SQL, (query_text, query_text, top_k))
+    return [(row[0], row[1]) for row in cur.fetchall()]
+
+
+def search_chunks_hybrid(
+    cur: psycopg.Cursor,
+    query_embedding: Vector,
+    query_text: str,
+    top_k: int,
+    fts_k: int | None = None,
+) -> list[str]:
+    """Hybrid search combining vector cosine distance and full-text search via RRF."""
+    vec_k = top_k
+    fts_k = fts_k or top_k
+
+    vec_results = search_chunks_vector(cur, query_embedding, vec_k)
+    fts_results = search_chunks_fts(cur, query_text, fts_k)
+
+    content_scores: dict[str, float] = {}
+    for rank, (content, _) in enumerate(vec_results):
+        content_scores[content] = content_scores.get(content, 0.0) + 1.0 / (60 + rank)
+
+    for rank, (content, _) in enumerate(fts_results):
+        content_scores[content] = content_scores.get(content, 0.0) + 1.0 / (60 + rank)
+
+    ranked = sorted(content_scores, key=content_scores.__getitem__, reverse=True)
+    return ranked[:top_k]
 
 
 def is_file_ingested(conn: psycopg.Connection, file_name: str) -> bool:

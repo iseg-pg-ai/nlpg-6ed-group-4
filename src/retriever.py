@@ -6,20 +6,29 @@ from dotenv import load_dotenv
 
 import helpers.db_utils as db
 from helpers.lm_studio_utils import LMStudioModelEmbedder
+from reranker import rerank
 
-load_dotenv()  # Load environment variables
+load_dotenv()
+
+_RETRIEVAL_CACHE: dict[str, list[str]] = {}
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RetrieverConfig:
-    """Immutable, slot-optimized configuration for the context retriever."""
-
     embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
     top_k: int = int(os.getenv("TOP_K", "3"))
 
 
-def retrieve_context(query: str, top_k: int | None = None, config: RetrieverConfig | None = None) -> list[str]:
-    """Convert a query into an embedding and retrieve matching context chunks from PostgreSQL."""
+def retrieve_context(
+    query: str,
+    top_k: int | None = None,
+    config: RetrieverConfig | None = None,
+    rerank_model: str | None = None,
+) -> list[str]:
+    cache_key = f"{query}:{top_k}:{rerank_model}"
+    if cache_key in _RETRIEVAL_CACHE:
+        return _RETRIEVAL_CACHE[cache_key]
+
     cfg = config or RetrieverConfig()
     limit = top_k if top_k is not None else cfg.top_k
 
@@ -29,14 +38,23 @@ def retrieve_context(query: str, top_k: int | None = None, config: RetrieverConf
     try:
         with db.get_db_connection() as conn:
             with conn.cursor() as cur:
-                return db.search_chunks(cur, query_embedding, limit)
+                results = db.search_chunks_hybrid(cur, query_embedding, query, limit)
     except psycopg.Error as err:
         print(f"[ERROR] Database failure during context retrieval: {err}")
-        return []
+        results = []
+
+    if results and rerank_model:
+        results = rerank(query, results, rerank_model)
+
+    _RETRIEVAL_CACHE[cache_key] = results
+    return results
+
+
+def clear_cache() -> None:
+    _RETRIEVAL_CACHE.clear()
 
 
 def retrieval_test(test_query: str, config: RetrieverConfig | None = None) -> None:
-    """Test the retrieval pipeline with a sample query."""
     cfg = config or RetrieverConfig()
 
     embedder = LMStudioModelEmbedder(cfg.embedding_model_name)

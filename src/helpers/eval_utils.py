@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any
 
 from deepeval.metrics import BaseMetric
@@ -50,7 +51,12 @@ class LMStudioJudge(DeepEvalBaseLLM):
                 return schema.model_validate_json(content)
             except ValidationError as err:
                 print(f"[ERROR] Failed to parse LLM output into schema: {err}")
-                return content
+                defaults = {}
+                for name, field_info in schema.model_fields.items():
+                    if field_info.is_required():
+                        tp = field_info.annotation
+                        defaults[name] = "" if tp is str else (0.0 if tp is float else (0 if tp is int else None))
+                return schema.model_construct(**defaults)
 
         return content
 
@@ -60,7 +66,7 @@ class LMStudioJudge(DeepEvalBaseLLM):
         schema: type[BaseModel] | None = None,
         **kwargs: Any,
     ) -> Any:
-        return self.generate(prompt, schema=schema, **kwargs)
+        return await asyncio.to_thread(self.generate, prompt, schema=schema, **kwargs)
 
     def get_model_name(self) -> str:
         return self.model_name

@@ -1,5 +1,8 @@
 import asyncio
 import os
+import shutil
+import tempfile
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypedDict
@@ -26,7 +29,7 @@ class GuardrailsConfig:
 
     base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
     api_key: str = os.getenv("LLM_API_KEY", "local-dummy-key")
-    test_model: str = os.getenv("MODEL_A", "mistralai/ministral-3-3b")
+    test_model: str = os.getenv("MODEL_A", "ministral-3-3b-instruct-2512")
     embed_model: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
     config_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent / "nemo_config")
 
@@ -42,14 +45,15 @@ class GuardrailsPipeline:
         self.model_name = model_name
         self.config = config or GuardrailsConfig()
         self.last_context: list[str] = []
-
-        # Configure environment variables required by NeMo and config.yml
-        os.environ["OPENAI_API_BASE"] = self.config.base_url
-        os.environ["OPENAI_BASE_URL"] = self.config.base_url
-        os.environ["OPENAI_API_KEY"] = self.config.api_key
-        os.environ["CURRENT_NEMO_MODEL"] = self.model_name
+        self._tmp_dir: str | None = None
 
         self.app = self._initialize_rails()
+        weakref.finalize(self, self._cleanup)
+
+    def _cleanup(self) -> None:
+        if self._tmp_dir is not None:
+            shutil.rmtree(self._tmp_dir, ignore_errors=True)
+            self._tmp_dir = None
 
     def _initialize_rails(self) -> LLMRails:
         print(f"[GUARDRAILS] Initializing NeMo Guardrails for {self.model_name!r}...")
@@ -57,7 +61,22 @@ class GuardrailsPipeline:
         if not self.config.config_dir.exists():
             raise FileNotFoundError(f"Guardrails config directory not found: {self.config.config_dir!r}")
 
-        rails_config = RailsConfig.from_path(str(self.config.config_dir))
+        # Copy config dir to a temp dir with env vars substituted inline,
+        # avoiding global os.environ mutation.
+        config_dir = self.config.config_dir
+        tmp_dir = tempfile.mkdtemp(prefix="nemo_config_")
+        self._tmp_dir = tmp_dir
+
+        for fname in os.listdir(str(config_dir)):
+            src = config_dir / fname
+            if src.is_file():
+                content = src.read_text(encoding="utf-8")
+                content = content.replace("$LLM_BASE_URL", self.config.base_url)
+                content = content.replace("$CURRENT_NEMO_MODEL", self.model_name)
+                dst = Path(tmp_dir) / fname
+                dst.write_text(content, encoding="utf-8")
+
+        rails_config = RailsConfig.from_path(tmp_dir)
         app = LLMRails(rails_config)
 
         async def run_rag_action(query: str) -> str:
