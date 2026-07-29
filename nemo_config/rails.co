@@ -1,0 +1,26 @@
+define user ask politics
+  "what do you think about the president?"
+  "who should I vote for in the next election?"
+  "are you a democrat or republican?"
+  "tell me about politics"
+  "what are your political views?"
+
+define bot refuse politics
+  "I am a corporate AI assistant. I am restricted from discussing politics."
+
+define flow politics
+  user ask politics
+  bot refuse politics
+  bot stop
+
+define user ask question
+  "What is the main topic of the text?"
+  "Can you explain how this works based on the document?"
+  "Tell me about the history mentioned in the file."
+  "Summarize the contents of the database."
+  "What does the text say about this subject?"
+
+define flow answer question
+  user ask question
+  $answer = execute run_rag_action(query=$user_message)
+  bot $answer

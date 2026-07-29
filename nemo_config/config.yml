@@ -1,0 +1,12 @@
+models:
+  - type: main
+    engine: openai
+    model: $CURRENT_NEMO_MODEL # NeMo will dynamically read this from os.environ when initialized!
+    parameters:
+      base_url: $LLM_BASE_URL
+      api_key: "local-dummy-key"
+
+rails:
+  dialog:
+    user_messages:
+      embeddings_only: True

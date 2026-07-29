@@ -1,0 +1,32 @@
+@startuml level-two
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_TOP_DOWN()
+
+title Container Diagram: Enterprise RAG Architecture
+skinparam linetype ortho
+skinparam nodesep 150
+
+Person(user, "User", "A user interacting with the system")
+
+System_Boundary(python_app, "Python Application") {
+    Container(evaluator, "DeepEval + MLflow", "Python", "LLM-as-a-Judge automated scoring")
+    Container(guardrails, "NeMo Guardrails", "Python", "Intercepts traffic and enforces Colang safety rules")
+    Container(orchestrator, "RAG Orchestrator", "Python", "Manages context retrieval and prompt building")
+    
+    ' Alinhamento invisível para forçar a organização
+    Lay_R(guardrails, orchestrator)
+}
+
+Container_Ext(lmstudio, "LM Studio Server", "C++ / llama.cpp", "Hosts local models (Qwen, Ministral, Nomic, Llama 3.2)")
+ContainerDb_Ext(pgvector, "PostgreSQL", "pgvector", "Stores document chunks and vectors")
+
+Rel_D(user, guardrails, "Asks questions")
+Rel_D(evaluator, orchestrator, "Feeds Golden Set for testing")
+Rel_R(guardrails, orchestrator, "Triggers RAG action if safe")
+
+Rel_D(guardrails, lmstudio, "Intent matching & Safety checks")
+Rel_D(orchestrator, lmstudio, "Embeddings & Generation")
+Rel_D(orchestrator, pgvector, "Hybrid Similarity Search")
+
+@enduml

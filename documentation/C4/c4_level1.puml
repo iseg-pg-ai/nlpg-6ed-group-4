@@ -1,0 +1,22 @@
+@startuml level-one
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+skinparam linetype ortho
+skinparam nodesep 100
+
+LAYOUT_TOP_DOWN()
+' LAYOUT_WITH_LEGEND()
+
+title System Context Diagram: Enterprise RAG Architecture
+
+Person(user, "User", "A user interacting with the AI assistant")
+System(rag_system, "AI RAG System", "Intercepts prompts, retrieves context, and securely generates answers")
+
+System_Ext(lmstudio, "LM Studio Server", "Local LLM execution environment (Generators, Embedders, Judges)")
+SystemDb_Ext(pgvector, "PostgreSQL (PGVector)", "Stores and searches high-dimensional embeddings")
+
+Rel_D(user, rag_system, "Asks questions", "Text")
+Rel_D(rag_system, lmstudio, "Sends prompts & data", "REST API")
+Rel_D(rag_system, pgvector, "Queries for context", "SQL / Vectors")
+
+@enduml
