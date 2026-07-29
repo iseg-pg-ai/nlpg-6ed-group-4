@@ -11,7 +11,7 @@ from pypdf import PdfReader  # Modern, actively maintained successor to PyPDF2
 import helpers.db_utils as db
 from helpers.lm_studio_utils import LMStudioModelEmbedder
 
-load_dotenv()  # Load environment variables
+load_dotenv(override=True)  # Load environment variables
 
 _SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(])")
 

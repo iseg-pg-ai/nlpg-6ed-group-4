@@ -1,5 +1,4 @@
 import os
-import time
 from dataclasses import dataclass
 from typing import Any, override
 
@@ -7,7 +6,7 @@ import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -173,65 +172,3 @@ class LMStudioModelEmbedder(LMStudioModel):
         """Generate embedding vectors for a batch of texts in a single API call."""
         response = self.client.embeddings.create(input=texts, model=self.model_name)
         return [item.embedding for item in response.data]
-
-
-def ensure_models_downloaded(config: LMStudioConfig | None = None) -> None:
-    """Ensure all required models are downloaded on disk via LM Studio REST API."""
-    cfg = config or LMStudioConfig()
-    models = (
-        os.getenv("MODEL_A", "ministral-3-3b-instruct-2512"),
-        os.getenv("MODEL_B", "qwen3.5-2b"),
-        os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5"),
-        os.getenv("JUDGE_MODEL", "llama-3.2-1b-instruct@q6_k"),
-    )
-
-    print("\n[SYSTEM] Verifying required models are downloaded via LM Studio API...")
-
-    try:
-        for model in models:
-            print(f"[SYSTEM] Checking {model!r}...")
-            response = json_post(cfg.download_url, {"model": model})
-
-            if not response.ok:
-                print(f"[ERROR] API rejected download request for {model!r}: {response.text}")
-                continue
-
-            match response.json():
-                case {"status": "already_downloaded"}:
-                    print("Already downloaded.")
-
-                case {"status": "downloading", "job_id": job_id}:
-                    print(f"Downloading (Job ID: {job_id}). This may take a few minutes...")
-
-                    max_polls = 60
-                    poll_interval = 3
-                    for attempt in range(max_polls):
-                        status_resp = _session.get(f"{cfg.status_url}/{job_id}", timeout=10)
-                        if not status_resp.ok:
-                            print(f"[ERROR] Polling failed for job {job_id!r}. Status code: {status_resp.status_code}")
-                            break
-
-                        match status_resp.json():
-                            case {"status": "completed"}:
-                                print("Download complete!")
-                                break
-                            case {"status": "failed" | "paused" as state}:
-                                print(f"Download {state}. Please check the LM Studio UI.")
-                                break
-                            case status_data:
-                                status_val = status_data.get("status", "unknown")
-                                if attempt == 0:
-                                    print(f"[DEBUG] Polling job {job_id!r}... Status: {status_val}")
-                                if attempt == max_polls - 1:
-                                    print(f"[ERROR] Download job {job_id!r} did not complete after {max_polls * poll_interval}s.")
-                                    break
-
-                        time.sleep(poll_interval)
-
-                case unknown:
-                    print(f"[WARNING] Unrecognized API response for {model!r}: {unknown}")
-
-        print("[SYSTEM] All models verified!\n")
-
-    except requests.exceptions.RequestException as err:
-        print(f"[ERROR] Could not communicate with LM Studio server: {err}")

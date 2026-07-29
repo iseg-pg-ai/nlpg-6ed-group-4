@@ -13,7 +13,7 @@ from nemoguardrails import LLMRails, RailsConfig
 import rag
 from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
 
-load_dotenv()
+load_dotenv(override=True)
 
 
 class GuardrailsResult(TypedDict):

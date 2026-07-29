@@ -11,7 +11,7 @@ from pgvector.psycopg import register_vector
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
-load_dotenv()
+load_dotenv(override=True)
 
 type Vector = Sequence[float] | list[float]  # PEP 695 Native Type Alias (Python 3.12+)
 
