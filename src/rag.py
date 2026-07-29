@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import retriever
 from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
 
-load_dotenv()  # Load environment variables
+load_dotenv(override=True)  # Load environment variables
 
 _QUERY_CACHE: dict[str, str] = {}
 
