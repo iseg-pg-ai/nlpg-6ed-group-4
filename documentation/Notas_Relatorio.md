@@ -23,6 +23,9 @@
 - Os prompts de sistema são vulneráveis a *jailbreaks* e falham frequentemente na aplicação de restrições negativas. O *NeMo Guardrails* resolve isto ao intercetar entradas programaticamente através de regras em *Colang* e correspondência de intenções semânticas, bloqueando de forma **determinística** tópicos restritos antes que estes cheguem ao LLM principal.
 - Embora a classificação de intenção adicione um pequeno overhead, a verificação estrita de esquemas JSON reduz, na verdade, a latência total. Forçar JSON estruturado de raiz elimina tokens de conversa desnecessários e evita erros no parser. Em conjunto, garantem segurança de nível empresarial e um *parsing* fiável com um impacto negligenciável de desempenho.
 
+
+Em adiçao as guardrails deveriam haver metricas pedidos que estao a bater nas guardrails e que estao provavelmente a tentar passar por elas 
+
 **Porquê nomic-embed-text-v1.5 em vez de all-MiniLM-L6-v2?**
 - Escolhemos o nomic-embed-text-v1.5 porque supera dramaticamente modelos mais antigos como o all-MiniLM-L6-v2 em arquiteturas RAG modernas. Enquanto o MiniLM está limitado a uma janela de contexto de 256 tokens, o Nomic suporta até 8192 tokens, evitando perdas críticas de dados durante a ingestão. 
 - Além disso, os seus vetores de 768 dimensões capturam uma representação semântica significativamente mais rica do texto. Esta maior dimensionalidade melhora drasticamente a precisão das nossas procuras por similaridade de cosseno no PGVector à escala.

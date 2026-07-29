@@ -1,0 +1,285 @@
+@startuml classes_c4_level4
+set namespaceSeparator none
+skinparam linetype ortho
+skinparam nodesep 100
+skinparam class {
+    BackgroundColor LightBlue
+    ArrowColor DarkSlateGray
+    BorderColor DarkBlue
+}
+class "BaseGuardrails" as nemoguardrails.base_guardrails.BaseGuardrails {
+  config : RailsConfig
+  {abstract}generate() -> Any
+  {abstract}generate_async() -> Any
+  {abstract}stream_async() -> AsyncIterator[Any]
+}
+class "BaseMetric" as deepeval.metrics.base_metric.BaseMetric {
+  async_mode : bool
+  error : Optional[str]
+  evaluation_cost : Optional[float]
+  evaluation_model : Optional[str]
+  include_reason : bool
+  input_tokens : Optional[int]
+  model : Optional[DeepEvalBaseLLM]
+  output_tokens : Optional[int]
+  reason : Optional[str]
+  requires_trace : bool
+  score : Optional[float]
+  score_breakdown : Optional[Dict]
+  skipped : bool
+  strict_mode : bool
+  success : Optional[bool]
+  threshold : float
+  using_native_model : Optional[bool]
+  verbose_logs : Optional[str]
+  verbose_mode : bool
+  {abstract}a_measure(test_case: LLMTestCase) -> float
+  {abstract}is_successful() -> bool
+  {abstract}measure(test_case: LLMTestCase) -> float
+}
+class "BatchItem" as src.evaluate.BatchItem {
+  answer : str
+  context : list[str | Any]
+  expected_output : str
+  query : str
+}
+class "DatabaseConfig" as src.helpers.db_utils.DatabaseConfig {
+  conninfo : str
+  dbname : str | None
+  host : str | None
+  password : str | None
+  port : str | None
+  user : str | None
+  vector_dim : int
+  from_env() -> Self
+}
+class "DeepEvalBaseLLM" as deepeval.models.base_model.DeepEvalBaseLLM {
+  model
+  name : NoneType
+  {abstract}a_generate() -> str
+  a_generate_with_schema()
+  {abstract}batch_generate() -> List[str]
+  {abstract}generate() -> str
+  generate_with_schema()
+  {abstract}get_model_name() -> str
+  {abstract}load_model() -> 'DeepEvalBaseLLM'
+  supports_json_mode() -> Union[bool, None]
+  supports_log_probs() -> Union[bool, None]
+  supports_multimodal() -> Union[bool, None]
+  supports_structured_outputs() -> Union[bool, None]
+  supports_temperature() -> Union[bool, None]
+}
+class "EvalConfig" as src.evaluate.EvalConfig {
+  embedding_model : str
+  experiment_name : str
+  judge_model : str
+  model_a : str
+  model_b : str
+  models : tuple[str, ...]
+  temperatures : tuple[float, ...]
+  tracking_uri : str
+}
+class "Guardrails" as nemoguardrails.guardrails.guardrails.Guardrails {
+  config : RailsConfig
+  events_history_cache : dict
+  explain_info : Optional[ExplainInfo]
+  llm : Optional[LLMModel]
+  passthrough_fn : Optional[Callable]
+  rails_engine : IORails | LLMRails
+  runtime : Runtime
+  use_iorails_engine : bool
+  verbose : bool
+  check(messages: List[dict], rail_types: Optional[List[RailType]]) -> RailsResult
+  check_async(messages: List[dict], rail_types: Optional[List[RailType]]) -> RailsResult
+  explain() -> ExplainInfo
+  generate(prompt: str | None, messages: LLMMessages | None) -> Union[str, dict, GenerationResponse, Tuple[dict, dict]]
+  generate_async(prompt: str | None, messages: LLMMessages | None) -> str
+  generate_events(events: List[dict]) -> List[dict]
+  generate_events_async(events: List[dict]) -> List[dict]
+  process_events(events: List[dict], state: Union[Optional[dict], State], blocking: bool) -> Tuple[List[dict], Union[dict, State]]
+  process_events_async(events: List[dict], state: Union[Optional[dict], State], blocking: bool) -> Tuple[List[dict], Union[dict, State]]
+  register_action(action: Callable, name: Optional[str]) -> Self
+  register_action_param(name: str, value: Any) -> Self
+  register_embedding_provider(cls: Type[EmbeddingModel], name: Optional[str]) -> Self
+  register_embedding_search_provider(name: str, cls: Type[EmbeddingsIndex]) -> Self
+  register_filter(filter_fn: Callable, name: Optional[str]) -> Self
+  register_output_parser(output_parser: Callable, name: str) -> Self
+  register_prompt_context(name: str, value_or_fn: Any) -> Self
+  shutdown() -> None
+  startup() -> None
+  stream_async(prompt: str | None, messages: LLMMessages | None) -> AsyncIterator[str | dict]
+  update_llm(llm: LLMModel) -> None
+}
+class "GuardrailsConfig" as src.guardrails.GuardrailsConfig {
+  api_base : str
+  api_key : str
+  base_url : str
+  config_dir : Path
+  embed_model : str
+  test_model : str
+  from_env() -> Self
+}
+class "GuardrailsPipeline" as src.guardrails.GuardrailsPipeline {
+  app
+  config
+  last_context : list[str]
+  model_name : str
+  ask(user_query: str) -> GuardrailsResult
+  clear_context() -> None
+}
+class "GuardrailsResult" as src.guardrails.GuardrailsResult {
+  answer : str
+  context : list[str]
+}
+class "IngestConfig" as src.ingest.IngestConfig {
+  chunk_overlap : int
+  chunk_size : int
+  data_dir : Path
+  embedding_model_name : str
+}
+class "LLMRails" as nemoguardrails.rails.llm.llmrails.LLMRails {
+  config : RailsConfig
+  default_embedding_engine
+  default_embedding_model
+  default_embedding_params
+  embedding_search_providers
+  events_history_cache : dict
+  explain_info
+  kb
+  llm : Optional[LLMModel]
+  llm_generation_actions
+  passthrough_fn
+  runtime : Runtime
+  verbose : bool
+  check(messages: List[dict], rail_types: Optional[List[RailType]]) -> RailsResult
+  check_async(messages: List[dict], rail_types: Optional[List[RailType]]) -> RailsResult
+  explain() -> ExplainInfo
+  generate(prompt: Optional[str], messages: Optional[List[dict]], options: Optional[Union[dict, GenerationOptions]], state: Optional[dict])
+  generate_async(prompt: Optional[str], messages: Optional[List[dict]], options: Optional[Union[dict, GenerationOptions]], state: Optional[Union[dict, State]], streaming_handler: Optional[StreamingHandler]) -> Union[str, dict, GenerationResponse, Tuple[dict, dict]]
+  generate_events(events: List[dict]) -> List[dict]
+  generate_events_async(events: List[dict]) -> List[dict]
+  process_events(events: List[dict], state: Union[Optional[dict], State], blocking: bool) -> Tuple[List[dict], Union[dict, State]]
+  process_events_async(events: List[dict], state: Union[Optional[dict], State], blocking: bool) -> Tuple[List[dict], Union[dict, State]]
+  register_action(action: Callable, name: Optional[str]) -> Self
+  register_action_param(name: str, value: Any) -> Self
+  register_embedding_provider(cls: Type[EmbeddingModel], name: Optional[str]) -> Self
+  register_embedding_search_provider(name: str, cls: Type[EmbeddingsIndex]) -> Self
+  register_filter(filter_fn: Callable, name: Optional[str]) -> Self
+  register_output_parser(output_parser: Callable, name: str) -> Self
+  register_prompt_context(name: str, value_or_fn: Any) -> Self
+  stream_async(prompt: Optional[str], messages: Optional[List[dict]], options: Optional[Union[dict, GenerationOptions]], state: Optional[Union[dict, State]], include_metadata: Literal[False], generator: Optional[AsyncIterator[str]], include_generation_metadata: Optional[bool]) -> AsyncIterator[str]
+  update_llm(llm: LLMModel)
+}
+class "LMStudioConfig" as src.helpers.lm_studio_utils.LMStudioConfig {
+  api_base : str
+  api_key : str
+  base_url : str
+  download_url : str
+  get_all_models_url : str
+  load_model_url : str
+  status_url : str
+  unload_model_url : str
+}
+class "LMStudioJudge" as src.helpers.eval_utils.LMStudioJudge {
+  llm
+  model_name : str
+  a_generate(prompt: str, schema: type[BaseModel] | None) -> Any
+  generate(prompt: str, schema: type[BaseModel] | None) -> Any
+  get_model_name() -> str
+  load_model() -> DeepEvalBaseLLM
+}
+class "LMStudioModel" as src.helpers.lm_studio_utils.LMStudioModel {
+  client
+  config
+  model_name : str
+  generate(messages, temperature, max_tokens, response_format) -> Any
+  load(context_length: int) -> None
+  unload() -> None
+  unload_all(config: LMStudioConfig | None) -> None
+}
+class "LMStudioModelEmbedder" as src.helpers.lm_studio_utils.LMStudioModelEmbedder {
+  embed(text: str) -> list[float]
+  embed_batch(texts: list[str]) -> list[list[float]]
+  load(context_length: int) -> None
+}
+class "NLPLexicalOverlapMetric" as src.helpers.eval_utils.NLPLexicalOverlapMetric {
+  reason : str | None
+  score : float | None
+  success : bool | None
+  threshold : float
+  a_measure(test_case: LLMTestCase) -> float
+  is_successful() -> bool
+  measure(test_case: LLMTestCase) -> float
+}
+class "OpenAI" as openai._client.OpenAI {
+  admin : Admin
+  admin_api_key : str | None
+  api_key : str
+  audio : Audio
+  auth_headers : dict[str, str]
+  batches : Batches
+  beta : Beta
+  chat : Chat
+  completions : Completions
+  containers : Containers
+  conversations : Conversations
+  default_headers : dict[str, str | Omit]
+  embeddings : Embeddings
+  evals : Evals
+  files : Files
+  fine_tuning : FineTuning
+  images : Images
+  models : Models
+  moderations : Moderations
+  organization : str | None
+  project : str | None
+  qs : Querystring
+  realtime : Realtime
+  responses : Responses
+  skills : Skills
+  uploads : Uploads
+  vector_stores : VectorStores
+  videos : Videos
+  webhook_secret : str | None
+  webhooks : Webhooks
+  websocket_base_url : str | httpx.URL | None
+  with_options
+  with_raw_response : OpenAIWithRawResponse
+  with_streaming_response : OpenAIWithStreamedResponse
+  workload_identity : WorkloadIdentity | None
+  copy() -> Self
+}
+class "RetrieverConfig" as src.retriever.RetrieverConfig {
+  embedding_model_name : str
+  top_k : int
+}
+class "SyncAPIClient" as openai._base_client.SyncAPIClient {
+  close() -> None
+  delete(path: str) -> ResponseT
+  get(path: str) -> ResponseT
+  get_api_list(path: str) -> SyncPageT
+  is_closed() -> bool
+  patch(path: str) -> ResponseT
+  post(path: str) -> ResponseT
+  put(path: str) -> ResponseT
+  request(cast_to, options) -> _StreamT
+}
+nemoguardrails.guardrails.guardrails.Guardrails --|> nemoguardrails.base_guardrails.BaseGuardrails
+nemoguardrails.rails.llm.llmrails.LLMRails --|> nemoguardrails.base_guardrails.BaseGuardrails
+openai._client.OpenAI --|> openai._base_client.SyncAPIClient
+src.helpers.eval_utils.LMStudioJudge --|> deepeval.models.base_model.DeepEvalBaseLLM
+src.helpers.eval_utils.NLPLexicalOverlapMetric --|> deepeval.metrics.base_metric.BaseMetric
+src.helpers.lm_studio_utils.LMStudioModelEmbedder --|> src.helpers.lm_studio_utils.LMStudioModel
+src.guardrails.GuardrailsPipeline --> src.guardrails.GuardrailsConfig : config
+src.helpers.lm_studio_utils.LMStudioModel --> src.helpers.lm_studio_utils.LMStudioConfig : config
+src.helpers.lm_studio_utils.LMStudioModel --* src.helpers.eval_utils.LMStudioJudge : llm
+nemoguardrails.guardrails.guardrails.Guardrails --* src.guardrails.GuardrailsPipeline : app
+nemoguardrails.rails.llm.llmrails.LLMRails --* src.guardrails.GuardrailsPipeline : app
+openai._client.OpenAI --* src.helpers.lm_studio_utils.LMStudioModel : client
+
+hide nemoguardrails.base_guardrails.BaseGuardrails members
+hide nemoguardrails.guardrails.guardrails.Guardrails members
+hide nemoguardrails.rails.llm.llmrails.LLMRails members
+hide openai._client.OpenAI members
+
+@enduml

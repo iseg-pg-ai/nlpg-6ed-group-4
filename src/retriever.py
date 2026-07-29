@@ -36,9 +36,8 @@ def retrieve_context(
     query_embedding = embedder.embed(query)
 
     try:
-        with db.get_db_connection() as conn:
-            with conn.cursor() as cur:
-                results = db.search_chunks_hybrid(cur, query_embedding, query, limit)
+        with db.get_db_connection() as conn, conn.cursor() as cur:
+            results = db.search_chunks_hybrid(cur, query_embedding, query, limit)
     except psycopg.Error as err:
         print(f"[ERROR] Database failure during context retrieval: {err}")
         results = []

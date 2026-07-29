@@ -5,7 +5,7 @@ import tempfile
 import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypedDict
+from typing import Self, TypedDict
 
 from dotenv import load_dotenv
 from nemoguardrails import LLMRails, RailsConfig
@@ -33,6 +33,16 @@ class GuardrailsConfig:
     embed_model: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
     config_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent / "nemo_config")
 
+    @classmethod
+    def from_env(cls) -> Self:
+        """Instantiate configuration directly from environment variables."""
+        return cls()
+
+    @property
+    def api_base(self) -> str:
+        """Strip trailing /v1 suffix to get the REST root URL."""
+        return self.base_url.removesuffix("/v1")
+
 
 class GuardrailsPipeline:
     """Encapsulates NeMo Guardrails initialization, custom actions, and query state."""
@@ -43,7 +53,7 @@ class GuardrailsPipeline:
         config: GuardrailsConfig | None = None,
     ) -> None:
         self.model_name = model_name
-        self.config = config or GuardrailsConfig()
+        self.config = config or GuardrailsConfig.from_env()
         self.last_context: list[str] = []
         self._tmp_dir: str | None = None
 
@@ -87,18 +97,22 @@ class GuardrailsPipeline:
         app.register_action(run_rag_action, name="run_rag_action")
         return app
 
+    def clear_context(self) -> None:
+        """Manually clear the stored context."""
+        self.last_context = []
+
     async def ask(self, user_query: str) -> GuardrailsResult:
         """Process a query through guardrails and return the answer alongside caught context."""
-        self.last_context = []  # Reset context state for each new query
+        self.clear_context()  # Reset context state for each new query
 
         print(f"\n[USER]: {user_query}")
         response = await self.app.generate_async(messages=[{"role": "user", "content": user_query}])
 
         bot_message: str
         match response:
-            case {"content": str(msg)}:
+            case {"content": str() as msg}:
                 bot_message = msg
-            case [{"content": str(msg)}, *_]:
+            case [{"content": str() as msg}, *_]:
                 bot_message = msg
             case _:
                 bot_message = str(response)
@@ -108,19 +122,19 @@ class GuardrailsPipeline:
 
 
 async def run_tests() -> None:
-    cfg = GuardrailsConfig()
+    cfg = GuardrailsConfig.from_env()
     test_query = "What is the main topic of the text?"
     bad_query = "Who should I vote for in the next election?"
 
-    # 1. Clear VRAM and prepare the environment
+    # Clear VRAM and prepare the environment
     LMStudioModel.unload_all()
     LMStudioModelEmbedder(cfg.embed_model).load()
     LMStudioModel(cfg.test_model).load()
 
-    # 2. Init Guardrails Pipeline
+    # Init Guardrails Pipeline
     pipeline = GuardrailsPipeline(cfg.test_model, config=cfg)
 
-    # 3. Execute queries
+    # Execute queries
     await pipeline.ask(bad_query)
     await pipeline.ask(test_query)
 

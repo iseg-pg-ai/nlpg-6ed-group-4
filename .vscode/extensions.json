@@ -7,6 +7,7 @@
         "KevinRose.vsc-python-indent",
         "cstrap.python-snippets",
         "charliermarsh.ruff",
-        "ItamarAri.colang-formatter"
+        "ItamarAri.colang-formatter",
+        "jebbs.plantuml"
     ]
 }
