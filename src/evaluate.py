@@ -15,7 +15,7 @@ from guardrails import GuardrailsPipeline
 from helpers.eval_utils import LMStudioJudge, NLPLexicalOverlapMetric
 from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
 
-load_dotenv(override=True)
+load_dotenv(override=True)  # Load environment variables
 
 
 class BatchItem(TypedDict):
@@ -36,7 +36,7 @@ class EvalConfig:
     model_b: str = os.getenv("MODEL_B", "qwen3.5-2b")
     judge_model: str = os.getenv("JUDGE_MODEL", "llama-3.2-1b-instruct@q6_k")
     embedding_model: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
-    temperatures: tuple[float, ...] = (0.0, 0.5)
+    temperatures: tuple[float, ...] = (0.0, 0.5, 1, 1.5, 2)
     experiment_name: str = "NLPG_RAG_Evaluation"
 
     @property

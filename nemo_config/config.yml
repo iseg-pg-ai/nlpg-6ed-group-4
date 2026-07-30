@@ -6,7 +6,30 @@ models:
       base_url: $LLM_BASE_URL
       api_key: "local-dummy-key"
 
+  - type: embeddings
+    engine: openai
+    model: $EMBEDDING_MODEL
+    parameters:
+      base_url: $LLM_BASE_URL
+      api_key: "local-dummy-key"
+
 rails:
   dialog:
     user_messages:
       embeddings_only: True
+
+# Activate Built-in Input Rails
+input:
+  flows:
+    - jailbreak detection heuristics
+    - mask sensitive data on input
+
+# Define what PII to block
+sensitive_data_detection:
+  input:
+    entities:
+      - EMAIL_ADDRESS
+      - PHONE_NUMBER
+      - CREDIT_CARD
+      - US_SSN
+      - IBAN_CODE
