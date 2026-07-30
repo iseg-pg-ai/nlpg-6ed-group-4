@@ -48,12 +48,13 @@ def build_prompt(context_chunks: list[str]) -> str:
     """Constructs the system prompt strictly enforcing the context."""
     context_str = "\n\n---\n\n".join(context_chunks)
     system_prompt = (
-        "You are an expert AI assistant. Your task is to answer the user's question "
-        "using ONLY the information provided in the context below.\n"
-        "If the answer cannot be found in the context, reply exactly with: "
-        "'I do not have enough information to answer this based on the retrieved documents.'\n\n"
+        "You are an expert aeronautical engineer specialized in EMAR regulations. "
+        "Your task is to answer the user's question using ONLY the information provided in the context below.\n\n"
+        "CRITICAL INSTRUCTIONS:\n"
+        "1. If the answer cannot be found in the context, you MUST reply exactly with: "
+        "'I do not have enough information to answer this based on the retrieved documents.' Do not add any other words.\n"
+        "2. If you CAN answer the question, format your response in Markdown and always cite the document section(s) used.\n\n"
     )
-    # This prompt acts as a "soft guardrail" against hallucinations
     return system_prompt + f"CONTEXT:\n{context_str}"
 
 
@@ -151,4 +152,6 @@ def test_rag(test_query):
 
 
 if __name__ == "__main__":
-    test_rag("What is the main topic of the text?")
+    test_rag(
+        "According to EMAR 66 Appendix I, what is the required level of knowledge for 'Electronic Displays' for a Category B2 licence?"
+    )

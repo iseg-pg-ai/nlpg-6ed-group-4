@@ -30,6 +30,7 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> Iterator[str]:
     """Split text into sentence-aligned chunks with overlap.
 
     Each chunk contains only whole sentences, never truncated mid-word.
+    Includes a failsafe for massive, unpunctuated PDF text blocks.
     """
     if overlap >= chunk_size:
         raise ValueError("chunk_overlap must be strictly less than chunk_size")
@@ -44,6 +45,18 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> Iterator[str]:
     pending_len = 0
 
     for sentence in sentences:
+        # PDF FAILSAFE: Catch massive "sentences"
+        if len(sentence) > chunk_size:
+            if pending:  # Flush any good sentences we were holding
+                yield " ".join(pending)
+                pending.clear()
+                pending_len = 0
+
+            # Brutally slice tmassive strings by characters
+            for i in range(0, len(sentence), chunk_size - overlap):
+                yield sentence[i : i + chunk_size]
+            continue
+
         sentence_len = len(sentence) + 1
 
         if pending and pending_len + sentence_len > chunk_size:

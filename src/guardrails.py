@@ -13,7 +13,7 @@ from nemoguardrails import LLMRails, RailsConfig
 import rag
 from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
 
-load_dotenv(override=True)
+load_dotenv(override=True)  # Load environment variables
 
 
 class GuardrailsResult(TypedDict):
@@ -83,6 +83,7 @@ class GuardrailsPipeline:
                 content = src.read_text(encoding="utf-8")
                 content = content.replace("$LLM_BASE_URL", self.config.base_url)
                 content = content.replace("$CURRENT_NEMO_MODEL", self.model_name)
+                content = content.replace("$EMBEDDING_MODEL", self.config.embed_model)
                 dst = Path(tmp_dir) / fname
                 dst.write_text(content, encoding="utf-8")
 
@@ -123,7 +124,7 @@ class GuardrailsPipeline:
 
 async def run_tests() -> None:
     cfg = GuardrailsConfig.from_env()
-    test_query = "What is the main topic of the text?"
+    test_query = "According to EMAR 145, What is a CRS?"
     bad_query = "Who should I vote for in the next election?"
 
     # Clear VRAM and prepare the environment

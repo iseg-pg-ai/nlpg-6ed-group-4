@@ -6,7 +6,7 @@ import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
-load_dotenv(override=True)
+load_dotenv(override=True)  # Load environment variables
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

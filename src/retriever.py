@@ -8,7 +8,7 @@ import helpers.db_utils as db
 from helpers.lm_studio_utils import LMStudioModelEmbedder
 from reranker import rerank
 
-load_dotenv(override=True)
+load_dotenv(override=True)  # Load environment variables
 
 _RETRIEVAL_CACHE: dict[str, list[str]] = {}
 

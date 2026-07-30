@@ -15,7 +15,7 @@ from guardrails import GuardrailsPipeline
 from helpers.eval_utils import LMStudioJudge, NLPLexicalOverlapMetric
 from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
 
-load_dotenv(override=True)
+load_dotenv(override=True)  # Load environment variables
 
 
 class BatchItem(TypedDict):
