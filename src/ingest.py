@@ -52,7 +52,7 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> Iterator[str]:
                 pending.clear()
                 pending_len = 0
 
-            # Brutally slice tmassive strings by characters
+            # Brutally slice massive strings by characters
             for i in range(0, len(sentence), chunk_size - overlap):
                 yield sentence[i : i + chunk_size]
             continue
