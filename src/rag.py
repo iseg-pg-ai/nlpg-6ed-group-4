@@ -49,11 +49,10 @@ def build_prompt(context_chunks: list[str]) -> str:
     context_str = "\n\n---\n\n".join(context_chunks)
     system_prompt = (
         "You are an expert aeronautical engineer specialized in EMAR regulations. "
-        "Your task is to answer the user's question using ONLY the information provided in the context below.\n\n"
+        "Your task is to answer briefly the user's question using **ONLY** the information provided in the context below.\n\n"
         "CRITICAL INSTRUCTIONS:\n"
         "1. If the answer cannot be found in the context, you MUST reply exactly with: "
         "'I do not have enough information to answer this based on the retrieved documents.' Do not add any other words.\n"
-        "2. If you CAN answer the question, format your response in Markdown and always cite the document section(s) used.\n\n"
     )
     return system_prompt + f"CONTEXT:\n{context_str}"
 
