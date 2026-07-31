@@ -29,7 +29,7 @@ Container_Boundary(python_app, "Python RAG Application") {
     Component(reranker, "Reranker", "reranker.py", "Stage 2c · LLM relevance scoring of retrieved chunks.")
 
     ' BOTTOM LAYER (Core Adapters)
-    Component(llm_client, "LLM API Client", "lm_studio_utils.py", "Handles API requests, VRAM limits, and dynamic loading.")
+    Component(llm_client, "LLM API Client", "lm_studio_utils.py", "Handles API requests, VRAM limits, and dynamic loading. /keepalive-connection-reuse-session")
     Component(db_adapter, "Database Adapter", "db_utils.py", "Manages connection pooling, hybrid search, and batch inserts.")
     Component(eval_utils, "Eval Utilities", "eval_utils.py", "LMStudioJudge + Jaccard lexical overlap metric.")
 
@@ -40,8 +40,9 @@ Container_Boundary(python_app, "Python RAG Application") {
     Lay_D(rag_orch, retriever)
     Lay_R(retriever, reranker)
     Lay_D(retriever, llm_client)
-    Lay_R(llm_client, eval_utils)
+    Lay_D(eval_utils, llm_client)
     Lay_D(reranker, db_adapter)
+    Lay_D(retriever, reranker)
     Lay_D(golden_set, eval_engine)
 }
 

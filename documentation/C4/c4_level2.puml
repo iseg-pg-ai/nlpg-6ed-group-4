@@ -38,14 +38,15 @@ System_Boundary(python_app, "Python RAG Application") {
     Lay_D(reranker, db_adapter)
 }
 
-Container_Ext(lmstudio, "LM Studio Server", "C++ / llama.cpp", "Hosts local models (Generators, Embedders, Judge)")
+Container_Ext(lmstudio, "LM Studio Server", "llama.cpp / nomic-embed-text-v1.5", "Hosts local models (Generators, Embedders, Judge)")
 ContainerDb_Ext(pgvector, "PostgreSQL", "pgvector", "Stores document chunks and embeddings")
 Container_Ext(mlflow, "MLflow Tracking Server", "Python", "Logs runs, metrics, detailed results")
 
 ' Pin external elements (must be declared after the boundary)
 Lay_R(evaluator, mlflow)
-Lay_R(reranker, lmstudio)
+Lay_R(retriever, lmstudio)
 Lay_D(db_adapter, pgvector)
+Lay_D(ingest, db_adapter)
 
 ' --- 1. Entry Points & Evaluation Flow ---
 Rel_D(evaluator, guardrails, "Feeds golden set")
