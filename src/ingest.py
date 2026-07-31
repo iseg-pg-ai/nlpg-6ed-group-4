@@ -1,3 +1,11 @@
+"""Document ingestion into pgvector.
+
+Reads PDF/TXT documents from the data directory, splits them into
+sentence-aligned chunks, embeds the chunks in batches via LM Studio, and stores
+them in the pgvector database. Includes a failsafe for huge unpunctuated blocks
+commonly found in PDFs.
+"""
+
 import os
 import re
 from collections.abc import Iterator
@@ -18,7 +26,14 @@ _SENTENCE_PATTERN = re.compile(r"(?<=[.!?])\s+(?=[A-Z\"'(])")
 
 @dataclass(frozen=True, slots=True)
 class IngestConfig:
-    """Immutable, slot-optimized ingestion configuration."""
+    """Immutable, slot-optimized ingestion configuration.
+
+    Attributes:
+        data_dir: Directory containing the source documents.
+        embedding_model_name: Embedding model used to vectorize chunks.
+        chunk_size: Maximum chunk length in characters.
+        chunk_overlap: Number of characters carried over between chunks.
+    """
 
     data_dir: Path = Path(os.getenv("DATA_DIR", "./data"))
     embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
@@ -29,8 +44,20 @@ class IngestConfig:
 def chunk_text(text: str, chunk_size: int, overlap: int) -> Iterator[str]:
     """Split text into sentence-aligned chunks with overlap.
 
-    Each chunk contains only whole sentences, never truncated mid-word.
-    Includes a failsafe for massive, unpunctuated PDF text blocks.
+    Each chunk contains only whole sentences, never truncated mid-word. Massive
+    unpunctuated blocks (a single "sentence" longer than ``chunk_size``) are
+    sliced by characters as a failsafe.
+
+    Args:
+        text: The raw document text to split.
+        chunk_size: Maximum chunk length in characters.
+        overlap: Number of characters shared with the previous chunk.
+
+    Yields:
+        Consecutive chunks of the input text.
+
+    Raises:
+        ValueError: If ``overlap`` is not strictly less than ``chunk_size``.
     """
     if overlap >= chunk_size:
         raise ValueError("chunk_overlap must be strictly less than chunk_size")
@@ -83,7 +110,18 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> Iterator[str]:
 
 
 def extract_text_from_pdf(file_path: Path) -> str:
-    """Extract text from a PDF file page by page using pypdf."""
+    """Extract all text from a PDF file, page by page.
+
+    Joins the extracted page texts with newlines to avoid merging words across
+    page boundaries. On failure, logs the error and returns an empty string.
+
+    Args:
+        file_path: Path to the PDF file to read.
+
+    Returns:
+        The concatenated page text, or an empty string if the file cannot be
+        read or contains no extractable text.
+    """
     try:
         reader = PdfReader(file_path)
         # Join extracted page text with newlines to avoid merged word boundaries
@@ -94,7 +132,16 @@ def extract_text_from_pdf(file_path: Path) -> str:
 
 
 def run_ingestion(reset_db: bool = True, config: IngestConfig | None = None) -> None:
-    """Read, chunk, embed, and ingest text/PDF documents into PostgreSQL."""
+    """Read, chunk, embed, and ingest text/PDF documents into PostgreSQL.
+
+    Loads the embedder once, optionally clears the database, ensures the schema
+    exists, and processes every supported file in the data directory. Files
+    already ingested are skipped unless the database is reset.
+
+    Args:
+        reset_db: If True, drop the existing table before ingesting.
+        config: Ingestion settings; uses environment-derived defaults if None.
+    """
     cfg = config or IngestConfig()
     print("Starting ingestion process...")
 

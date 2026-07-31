@@ -1,5 +1,11 @@
-"""
-This file contains the "Golden Set" for evaluating our RAG pipeline.
+"""Golden set of evaluation queries for the RAG pipeline.
+
+Provides ``EVALUATION_DATA``, a static list of dicts with ``query`` and
+``expected_output`` keys covering EMAR-domain questions, out-of-scope
+questions (which should yield a "not in documents" answer), and guardrail
+trigger phrases (politics, jailbreak, classified) with their expected bot
+replies. Used by :mod:`evaluate` to score the pipeline across models and
+temperatures.
 """
 
 EVALUATION_DATA = [

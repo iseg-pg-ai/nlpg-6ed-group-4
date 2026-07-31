@@ -1,3 +1,11 @@
+"""Retrieval-Augmented Generation (RAG) orchestration.
+
+Builds a context-anchored system prompt from retrieved chunks and queries a
+local LLM via LM Studio. Includes optional query rewriting and a rewritten-query
+cache. The system prompt positions the model as an expert aeronautical engineer
+specialized in EMAR regulations and forbids answering outside the context.
+"""
+
 import os
 
 from dotenv import load_dotenv
@@ -14,7 +22,17 @@ _QUERY_CACHE: dict[str, str] = {}
 def rewrite_query(query: str, model_name: str | None = None) -> str:
     """Rewrite a user query to be more effective for retrieval.
 
-    Returns the rewritten query, or the original if no model is available.
+    Rewrites are cached per original query. Returns the rewritten query, or the
+    original if no model is available or rewriting fails.
+
+    Args:
+        query: The original user query.
+        model_name: Optional LLM model used for rewriting; if None, the original
+            query is returned unchanged.
+
+    Returns:
+        The rewritten query, or the original query when rewriting is skipped
+        or fails.
     """
     if model_name is None:
         return query
@@ -46,7 +64,18 @@ def rewrite_query(query: str, model_name: str | None = None) -> str:
 
 
 def build_prompt(context_chunks: list[str]) -> str:
-    """Constructs the system prompt strictly enforcing the context."""
+    """Construct the system prompt strictly enforcing the retrieved context.
+
+    Joins the context chunks and wraps them in an EMAR-expert system prompt
+    that instructs the model to answer only from the provided context and to
+    respond with a fixed fallback message when the answer is not found.
+
+    Args:
+        context_chunks: The retrieved document chunks to ground the answer on.
+
+    Returns:
+        The fully assembled system prompt string.
+    """
     context_str = "\n\n---\n\n".join(context_chunks)
     system_prompt = (
         "You are an expert aeronautical engineer specialized in EMAR regulations. "
@@ -66,8 +95,25 @@ def ask_rag(
     rerank_model: str | None = None,
 ) -> dict:
     """
-    Orchestrates the Retrieval-Augmented Generation pipeline.
-    Returns a dictionary containing the answer and the retrieved context.
+    Orchestrate the Retrieval-Augmented Generation pipeline.
+
+    Optionally rewrites the query, retrieves context chunks (optionally
+    re-ranked), builds the context-grounded prompt, and queries the local LLM.
+    Handles reasoning-token models (e.g. Qwen distills), empty responses, and
+    connection errors with safe fallbacks.
+
+    Args:
+        query: The user question to answer.
+        model_name: The LLM model name used for generation.
+        temperature: Sampling temperature; 0.0 is best for factual RAG.
+        rewrite_model: Optional model name used to rewrite the query before
+            retrieval.
+        rerank_model: Optional model name used to re-rank retrieved chunks.
+
+    Returns:
+        A dictionary with keys ``answer`` (the generated answer string),
+        ``context`` (the retrieved chunks used), and ``model`` (the generator
+        model name).
     """
     retrieval_query = rewrite_query(query, rewrite_model)
     if retrieval_query != query:
@@ -125,7 +171,18 @@ def ask_rag(
     return {"answer": answer, "context": contexts, "model": model_name}
 
 
-def test_rag(test_query):
+def test_rag(test_query: str) -> None:
+    """Test the RAG pipeline manually with both configured models.
+
+    Loads the embedder plus each model in turn, asks the query through
+    :func:`ask_rag`, prints the answers, and unloads VRAM between switches.
+
+    Args:
+        test_query: The question to ask both models.
+
+    Raises:
+        RuntimeError: If the LM Studio / llama.cpp server is not running.
+    """
     # Ensure your llama.cpp/LMStudio server is running before executing this!
     model_a = os.getenv("MODEL_A", "ministral-3-3b-instruct-2512")
     model_b = os.getenv("MODEL_B", "qwen3.5-2b")

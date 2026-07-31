@@ -1,3 +1,11 @@
+"""Pipeline entrypoint.
+
+Runs the current production workflow: ingest the documents into pgvector and
+then evaluate the RAG pipeline with DeepEval + MLflow. Retriever, RAG, and
+guardrails stages are importable but their direct invocations are commented
+out and only exercised indirectly through ``evaluate``.
+"""
+
 import evaluate
 
 # import guardrails
@@ -8,6 +16,12 @@ import ingest
 
 
 def main():
+    """Run the ingestion stage followed by the evaluation stage.
+
+    Resets the database before ingesting so each run starts from a clean state,
+    then evaluates all golden-set queries across the configured models and
+    temperatures, logging results to MLflow.
+    """
     ingest.run_ingestion(reset_db=True)  # ingest grabs data from /data and pushes to PGVector
 
     # retriever.retrieval_test("What is the main topic of the text?")  # retriever handles PGVector similarity search

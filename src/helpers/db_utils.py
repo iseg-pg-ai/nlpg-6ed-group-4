@@ -1,3 +1,11 @@
+"""pgvector database helpers.
+
+Provides schema setup, chunk insertion, and vector/full-text/hybrid search over
+``document_chunks``, backed by a lazily created :class:`psycopg_pool.ConnectionPool`
+(min 1, max 4) with the ``vector`` extension and ``register_vector`` configured
+per connection. The pool is closed automatically at interpreter exit.
+"""
+
 import atexit
 import os
 from collections.abc import Iterator, Sequence
@@ -19,6 +27,11 @@ _pool: ConnectionPool | None = None
 
 
 def _close_pool() -> None:
+    """Close the global connection pool and reset it to None.
+
+    Registered as an ``atexit`` hook so the pool is released cleanly at
+    interpreter shutdown, avoiding ``PythonFinalizationError`` noise.
+    """
     global _pool
     if _pool is not None:
         _pool.close()
@@ -29,6 +42,15 @@ atexit.register(_close_pool)
 
 
 def _get_pool() -> ConnectionPool:
+    """Lazily create and return the global connection pool.
+
+    On first use, connects once with autocommit to create the ``vector``
+    extension before opening the pool, so that ``register_vector`` works in the
+    pool's ``configure`` callback.
+
+    Returns:
+        The shared :class:`ConnectionPool` instance.
+    """
     global _pool
     if _pool is None:
         cfg = DatabaseConfig.from_env()
@@ -47,7 +69,16 @@ def _get_pool() -> ConnectionPool:
 
 @dataclass(frozen=True, slots=True)
 class DatabaseConfig:
-    """Immutable, slot-optimized database configuration."""
+    """Immutable, slot-optimized database configuration.
+
+    Attributes:
+        user: PostgreSQL user name.
+        password: PostgreSQL password.
+        host: Database host.
+        port: Database port.
+        dbname: Database name.
+        vector_dim: Dimension of the embedding vectors.
+    """
 
     user: str | None = os.getenv("POSTGRES_USER")
     password: str | None = os.getenv("POSTGRES_PASSWORD")
@@ -58,11 +89,22 @@ class DatabaseConfig:
 
     @classmethod
     def from_env(cls) -> Self:
+        """Instantiate configuration directly from environment variables.
+
+        Returns:
+            A :class:`DatabaseConfig` populated from the current environment.
+        """
         return cls()
 
     @property
     def conninfo(self) -> str:
-        """Generate a libpq-compatible connection string."""
+        """Generate a libpq-compatible connection string.
+
+        Only the options that are set are included.
+
+        Returns:
+            A keyword/value connection string for :mod:`psycopg`.
+        """
         opts = {
             "user": self.user,
             "password": self.password,
@@ -133,7 +175,18 @@ LIMIT %s;
 
 @contextmanager
 def get_db_connection(config: DatabaseConfig | None = None) -> Iterator[psycopg.Connection]:
-    """Borrow a connection from the pool."""
+    """Borrow a connection from the pool.
+
+    When a ``config`` is provided, opens a dedicated standalone connection
+    instead of using the shared pool.
+
+    Args:
+        config: Optional database settings; if None, the pooled connection
+            (from the current environment) is used.
+
+    Yields:
+        An open :class:`psycopg.Connection` to be used within the ``with`` block.
+    """
     if config is not None:
         conn = psycopg.connect(config.conninfo)
         register_vector(conn)
@@ -147,7 +200,17 @@ def get_db_connection(config: DatabaseConfig | None = None) -> Iterator[psycopg.
 
 
 def setup_database(conn: psycopg.Connection, vector_dim: int | None = None) -> None:
-    """Create the pgvector extension and table schema if they do not exist."""
+    """Create the pgvector extension and table schema if they do not exist.
+
+    Ensures the ``vector`` extension, ``document_chunks`` table, IVFFlat index
+    on the embedding column, tsvector column, and GIN full-text index are all
+    present, then commits.
+
+    Args:
+        conn: An open database connection.
+        vector_dim: Dimension for the embedding column; defaults to the value
+            from the environment.
+    """
     dim = vector_dim or DatabaseConfig.from_env().vector_dim
 
     with conn.cursor() as cur:
@@ -163,7 +226,11 @@ def setup_database(conn: psycopg.Connection, vector_dim: int | None = None) -> N
 
 
 def clear_database(conn: psycopg.Connection) -> None:
-    """Drop the document_chunks table to start fresh."""
+    """Drop the document_chunks table to start fresh.
+
+    Args:
+        conn: An open database connection.
+    """
     with conn.cursor() as cur:
         cur.execute(DROP_SQL)
 
@@ -172,23 +239,53 @@ def clear_database(conn: psycopg.Connection) -> None:
 
 
 def insert_chunk(cur: psycopg.Cursor, file_name: str, chunk: str, embedding: Vector) -> None:
-    """Insert a single document chunk and its vector embedding."""
+    """Insert a single document chunk and its vector embedding.
+
+    Args:
+        cur: An open database cursor.
+        file_name: Source file the chunk came from.
+        chunk: The chunk text.
+        embedding: The embedding vector for the chunk.
+    """
     cur.execute(INSERT_SQL, (file_name, chunk, embedding))
 
 
 def insert_chunks_batch(cur: psycopg.Cursor, records: Sequence[tuple[str, str, Vector]]) -> None:
-    """Batch-insert multiple document chunks for higher throughput."""
+    """Batch-insert multiple document chunks for higher throughput.
+
+    Args:
+        cur: An open database cursor.
+        records: Sequence of ``(file_name, chunk, embedding)`` tuples.
+    """
     cur.executemany(INSERT_SQL, records)
 
 
 def search_chunks_vector(cur: psycopg.Cursor, query_embedding: Vector, top_k: int) -> list[tuple[str, float]]:
-    """Perform a cosine distance search (`<=>`) and return (content, distance) pairs."""
+    """Perform a cosine distance search (``<=>``) and return the closest chunks.
+
+    Args:
+        cur: An open database cursor.
+        query_embedding: The embedding vector to search for.
+        top_k: Maximum number of results to return.
+
+    Returns:
+        A list of ``(content, distance)`` pairs ordered by ascending distance.
+    """
     cur.execute(SEARCH_VECTOR_SQL, (query_embedding, query_embedding, top_k))
     return [(row[0], row[1]) for row in cur.fetchall()]
 
 
 def search_chunks_fts(cur: psycopg.Cursor, query_text: str, top_k: int) -> list[tuple[str, float]]:
-    """Perform a full-text search and return (content, score) pairs."""
+    """Perform a full-text search over the tsvector column.
+
+    Args:
+        cur: An open database cursor.
+        query_text: The text to search for.
+        top_k: Maximum number of results to return.
+
+    Returns:
+        A list of ``(content, rank)`` pairs ordered by descending rank.
+    """
     cur.execute(SEARCH_FTS_SQL, (query_text, query_text, top_k))
     return [(row[0], row[1]) for row in cur.fetchall()]
 
@@ -200,7 +297,22 @@ def search_chunks_hybrid(
     top_k: int,
     fts_k: int | None = None,
 ) -> list[str]:
-    """Hybrid search combining vector cosine distance and full-text search via RRF."""
+    """Search combining vector cosine distance and full-text search via RRF.
+
+    Both retrieval methods are run independently and merged with Reciprocal
+    Rank Fusion, so the final ordering balances semantic and lexical relevance.
+
+    Args:
+        cur: An open database cursor.
+        query_embedding: The embedding vector to search for.
+        query_text: The text to search for.
+        top_k: Maximum number of merged results to return.
+        fts_k: Number of full-text results to fetch before merging; defaults
+            to ``top_k``.
+
+    Returns:
+        A list of chunk contents ordered by fused relevance.
+    """
     vec_k = top_k
     fts_k = fts_k or top_k
 
@@ -219,7 +331,15 @@ def search_chunks_hybrid(
 
 
 def is_file_ingested(conn: psycopg.Connection, file_name: str) -> bool:
-    """Check if chunks from the given file already exist in the database."""
+    """Check if chunks from the given file already exist in the database.
+
+    Args:
+        conn: An open database connection.
+        file_name: The source file name to look up.
+
+    Returns:
+        True if at least one chunk references the file, False otherwise.
+    """
     with conn.cursor() as cur:
         cur.execute(CHECK_FILE_SQL, (file_name,))
         result = cur.fetchone()

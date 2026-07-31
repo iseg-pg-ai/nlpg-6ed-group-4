@@ -1,3 +1,12 @@
+"""Two-phase LLM evaluation with MLflow logging.
+
+Phase 1 generates answers for every golden-set query across each configured
+model and temperature through the guardrails pipeline. Phase 2 scores the
+answers with DeepEval metrics (faithfulness, answer relevancy, and a custom
+lexical overlap) using a local judge model, then logs the aggregated and
+per-query results to MLflow.
+"""
+
 import asyncio
 import os
 import sys
@@ -19,7 +28,14 @@ load_dotenv(override=True)  # Load environment variables
 
 
 class BatchItem(TypedDict):
-    """Structured result dictionary for Phase 1 generation output."""
+    """Structured result dictionary for Phase 1 generation output.
+
+    Attributes:
+        query: The original evaluation query.
+        expected_output: The golden expected answer.
+        answer: The generated answer from the pipeline.
+        context: The retrieved chunks used to produce the answer.
+    """
 
     query: str
     expected_output: str
@@ -29,7 +45,17 @@ class BatchItem(TypedDict):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EvalConfig:
-    """Immutable, slot-optimized configuration for the evaluation pipeline."""
+    """Immutable, slot-optimized configuration for the evaluation pipeline.
+
+    Attributes:
+        tracking_uri: MLflow tracking server URI.
+        model_a: First generator model.
+        model_b: Second generator model.
+        judge_model: Model used as the DeepEval LLM judge.
+        embedding_model: Embedding model loaded during evaluation.
+        temperatures: Sampling temperatures tested for each generator model.
+        experiment_name: MLflow experiment name.
+    """
 
     tracking_uri: str = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
     model_a: str = os.getenv("MODEL_A", "ministral-3-3b-instruct-2512")
@@ -41,11 +67,18 @@ class EvalConfig:
 
     @property
     def models(self) -> tuple[str, ...]:
+        """Return the generator models to evaluate, in order."""
         return (self.model_a, self.model_b)
 
 
 def check_mlflow_server(tracking_uri: str) -> None:
-    """Ping the MLflow server to ensure it is alive before running evaluations."""
+    """Ping the MLflow server to ensure it is alive before running evaluations.
+
+    Exits the process with an explanatory message if the server is unreachable.
+
+    Args:
+        tracking_uri: The MLflow server URI to ping.
+    """
     print(f"[SYSTEM] Checking MLflow server at {tracking_uri!r}...")
     try:
         requests.get(tracking_uri, timeout=2.0)
@@ -65,7 +98,15 @@ async def generate_batch_answers(
     pipeline: GuardrailsPipeline,
     dataset: list[dict[str, Any]],
 ) -> list[BatchItem]:
-    """Generate answers sequentially through the guardrails pipeline within a single event loop."""
+    """Generate answers sequentially through the guardrails pipeline within a single event loop.
+
+    Args:
+        pipeline: The initialized guardrails pipeline used to answer each query.
+        dataset: List of dicts with ``query`` and ``expected_output`` keys.
+
+    Returns:
+        A list of :class:`BatchItem` results, one per dataset entry.
+    """
     results: list[BatchItem] = []
 
     for item in dataset:
@@ -85,7 +126,20 @@ async def generate_batch_answers(
 
 
 def run_evaluation(config: EvalConfig | None = None) -> None:
-    """Orchestrate Phase 1 generation and Phase 2 LLM-as-a-Judge evaluation with MLflow logging."""
+    """Orchestrate Phase 1 generation and Phase 2 LLM-as-a-Judge evaluation with MLflow logging.
+
+    For each generator model and temperature, generates answers for the full
+    golden set, loads the judge model, scores every answer with DeepEval and a
+    custom lexical metric, and logs parameters, aggregate metrics, and a
+    per-query table to MLflow.
+
+    Args:
+        config: Evaluation settings; uses environment-derived defaults if None.
+
+    Raises:
+        SystemExit: If the MLflow server is unreachable (via
+            :func:`check_mlflow_server`).
+    """
     cfg = config or EvalConfig()
     check_mlflow_server(cfg.tracking_uri)
 
@@ -103,9 +157,7 @@ def run_evaluation(config: EvalConfig | None = None) -> None:
         for temp in cfg.temperatures:
             run_name = f"{model.split('/')[-1]}_temp_{temp}"
 
-            # ==========================================
             # PHASE 1: GENERATION
-            # ==========================================
             print(f"\n{'=' * 40}\nPHASE 1: GENERATING ANSWERS FOR {run_name}\n{'=' * 40}")
 
             gen_model = LMStudioModel(model)
@@ -116,9 +168,7 @@ def run_evaluation(config: EvalConfig | None = None) -> None:
 
             gen_model.unload()  # Free VRAM before launching judge model
 
-            # ==========================================
             # PHASE 2: EVALUATION (LLM-as-a-Judge)
-            # ==========================================
             print(f"\n{'=' * 40}\nPHASE 2: EVALUATING {run_name} WITH JUDGE: {cfg.judge_model}\n{'=' * 40}")
 
             judge_model = LMStudioModel(cfg.judge_model)
