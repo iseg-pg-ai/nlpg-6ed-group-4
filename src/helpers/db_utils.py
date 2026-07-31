@@ -32,9 +32,8 @@ def _get_pool() -> ConnectionPool:
     global _pool
     if _pool is None:
         cfg = DatabaseConfig.from_env()
-        with psycopg.connect(cfg.conninfo, autocommit=True) as tmp_conn:
-            with tmp_conn.cursor() as cur:
-                cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        with psycopg.connect(cfg.conninfo, autocommit=True) as tmp_conn, tmp_conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         _pool = ConnectionPool(
             cfg.conninfo,
             min_size=1,

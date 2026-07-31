@@ -88,7 +88,7 @@ def extract_text_from_pdf(file_path: Path) -> str:
         reader = PdfReader(file_path)
         # Join extracted page text with newlines to avoid merged word boundaries
         return "\n".join(page_text for page in reader.pages if (page_text := page.extract_text()))
-    except Exception as err:
+    except (OSError, ValueError) as err:
         print(f"[ERROR] Failed reading PDF {file_path.name!r}: {err}")
         return ""
 
@@ -140,7 +140,7 @@ def run_ingestion(reset_db: bool = True, config: IngestConfig | None = None) -> 
                         case _:
                             print(f"Skipping unsupported file type: {file_name!r}")
                             continue
-                except Exception as err:
+                except (OSError, ValueError, UnicodeDecodeError) as err:
                     print(f"[ERROR] Could not read file {file_name!r}: {err}")
                     continue
 

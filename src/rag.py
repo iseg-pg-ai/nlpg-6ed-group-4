@@ -1,6 +1,7 @@
 import os
 
 from dotenv import load_dotenv
+from openai import OpenAIError
 
 import retriever
 from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
@@ -37,8 +38,8 @@ def rewrite_query(query: str, model_name: str | None = None) -> str:
         )
         rewritten = (response.choices[0].message.content or "").strip()
         result = rewritten if rewritten else query
-    except Exception:
-        result = query
+    except (ValueError, RuntimeError, OpenAIError):
+        result = query  # Fallback to original query if we failed to rewrite
 
     _QUERY_CACHE[cache_key] = result
     return result
@@ -115,7 +116,7 @@ def ask_rag(
             else:
                 answer = "[ERROR: Empty response. If using Qwen, ensure LMStudio is set to the 'ChatML' prompt format!]"
 
-    except Exception as e:
+    except (ValueError, RuntimeError, OpenAIError) as e:
         print(f"[ERROR] Failed to connect to LLM: {e}")
         print("Make sure llama.cpp or LMStudio server is running!")
         answer = "Error generating response."

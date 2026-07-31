@@ -175,7 +175,7 @@ def run_evaluation(config: EvalConfig | None = None) -> None:
                             "Overlap Reason": overlap_metric.reason,
                         })
 
-                    except Exception as err:
+                    except (ValueError, TypeError, AssertionError, RuntimeError) as err:
                         print(f"[WARNING] DeepEval scoring failed: {err}")
 
                 # Aggregate and log averages

@@ -1,3 +1,5 @@
+from openai import OpenAIError
+
 from helpers.lm_studio_utils import LMStudioModel
 
 
@@ -39,7 +41,7 @@ def _score_chunk(query: str, chunk: str, llm: LMStudioModel | None) -> float:
         raw = raw.strip()
         score = float(raw)
         return max(0.0, min(1.0, score))
-    except (ValueError, AttributeError, Exception):
+    except (ValueError, AttributeError, RuntimeError, OpenAIError):
         return _lexical_score(query, chunk)
 
 
