@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import psycopg
 from dotenv import load_dotenv
@@ -16,34 +16,41 @@ _RETRIEVAL_CACHE: dict[str, list[str]] = {}
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RetrieverConfig:
     embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
-    top_k: int = int(os.getenv("TOP_K", "3"))
+    retrieval_top_k: int = field(default_factory=lambda: int(os.getenv("RETRIEVAL_TOP_K", "10")))
+    rerank_top_k: int = field(default_factory=lambda: int(os.getenv("RERANK_TOP_K", "3")))
 
 
 def retrieve_context(
     query: str,
-    top_k: int | None = None,
+    retrieval_k: int | None = None,
+    rerank_k: int | None = None,
     config: RetrieverConfig | None = None,
     rerank_model: str | None = None,
 ) -> list[str]:
-    cache_key = f"{query}:{top_k}:{rerank_model}"
-    if cache_key in _RETRIEVAL_CACHE:
-        return _RETRIEVAL_CACHE[cache_key]
 
     cfg = config or RetrieverConfig()
-    limit = top_k if top_k is not None else cfg.top_k
+    limit_retrieval = retrieval_k if retrieval_k is not None else cfg.retrieval_top_k
+    limit_rerank = rerank_k if rerank_k is not None else cfg.rerank_top_k
+    cache_key = f"{query}:{limit_retrieval}:{limit_rerank}:{rerank_model}"
+
+    if cache_key in _RETRIEVAL_CACHE:
+        return _RETRIEVAL_CACHE[cache_key]
 
     embedder = LMStudioModelEmbedder(cfg.embedding_model_name)
     query_embedding = embedder.embed(query)
 
     try:
         with db.get_db_connection() as conn, conn.cursor() as cur:
-            results = db.search_chunks_hybrid(cur, query_embedding, query, limit)
+            results = db.search_chunks_hybrid(cur, query_embedding, query, limit_retrieval)
     except psycopg.Error as err:
         print(f"[ERROR] Database failure during context retrieval: {err}")
         results = []
 
-    if results and rerank_model:
-        results = rerank(query, results, rerank_model)
+    if results:
+        if rerank_model:
+            results = rerank(query, results, rerank_model, top_k=limit_rerank)
+        else:
+            results = results[:limit_rerank]  # Fallback if no reranker is active: just slice the top 3 DB results
 
     _RETRIEVAL_CACHE[cache_key] = results
     return results
