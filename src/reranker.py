@@ -10,7 +10,7 @@ from openai import OpenAIError
 from helpers.lm_studio_utils import LMStudioModel
 
 
-def rerank(query: str, chunks: list[str], model_name: str | None = None) -> list[str]:
+def rerank(query: str, chunks: list[str], model_name: str | None = None, top_k: int = 3) -> list[str]:
     """Re-rank chunks by asking an LLM to score each for relevance to the query.
 
     Chunks with only a single element are returned unchanged. If ``model_name``
@@ -36,7 +36,7 @@ def rerank(query: str, chunks: list[str], model_name: str | None = None) -> list
         scored.append((score, chunk))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [chunk for _, chunk in scored]
+    return [chunk for _, chunk in scored][:top_k]
 
 
 def _score_chunk(query: str, chunk: str, llm: LMStudioModel | None) -> float:
