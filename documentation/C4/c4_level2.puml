@@ -1,32 +1,77 @@
 @startuml level-two
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
 
+skinparam linetype ortho
+skinparam nodesep 120
+
 LAYOUT_TOP_DOWN()
 
 title Container Diagram: Enterprise RAG Architecture
-skinparam linetype ortho
-skinparam nodesep 150
 
 Person(user, "User", "A user interacting with the system")
 
-System_Boundary(python_app, "Python Application") {
-    Container(evaluator, "DeepEval + MLflow", "Python", "LLM-as-a-Judge automated scoring")
-    Container(guardrails, "NeMo Guardrails", "Python", "Intercepts traffic and enforces Colang safety rules")
-    Container(orchestrator, "RAG Orchestrator", "Python", "Manages context retrieval and prompt building")
-    
-    ' Alinhamento invisível para forçar a organização
-    Lay_R(guardrails, orchestrator)
+System_Boundary(python_app, "Python RAG Application") {
+
+    ' ==== TOP LAYER (Entry Points) ====
+    Container(ingest, "Ingestion", "Python", "Reads EMAR PDFs/TXTs, chunks, embeds, stores")
+    Container(evaluator, "Evaluation Engine", "Python", "DeepEval LLM-as-a-Judge scoring + MLflow logging")
+
+    ' ==== SECOND LAYER (Safety & Orchestration) ====
+    Container(guardrails, "Guardrails Engine", "Python", "NeMo Colang intent matching & safety rules")
+    Container(rag_orch, "RAG Orchestrator", "Python", "Builds context-anchored prompts, generates answers")
+
+    ' ==== THIRD LAYER (Retrieval) ====
+    Container(retriever, "Retriever", "Python", "Hybrid vector + full-text search (RRF)")
+    Container(reranker, "Reranker", "Python", "LLM relevance re-scoring of chunks")
+
+    ' ==== BOTTOM LAYER (Shared Adapters) ====
+    Container(llm_client, "LLM Client", "Python", "Model load/unload, generation, embeddings")
+    Container(db_adapter, "Database Adapter", "Python", "Connection pool, schema, hybrid search")
+
+    ' Invisible constraints to force a clean grid
+    Lay_R(evaluator, ingest)
+    Lay_D(evaluator, guardrails)
+    Lay_D(guardrails, rag_orch)
+    Lay_D(rag_orch, retriever)
+    Lay_R(retriever, reranker)
+    Lay_D(retriever, llm_client)
+    Lay_D(reranker, db_adapter)
 }
 
-Container_Ext(lmstudio, "LM Studio Server", "C++ / llama.cpp", "Hosts local models (Qwen, Ministral, Nomic, Llama 3.2)")
-ContainerDb_Ext(pgvector, "PostgreSQL", "pgvector", "Stores document chunks and vectors")
+Container_Ext(lmstudio, "LM Studio Server", "C++ / llama.cpp", "Hosts local models (Generators, Embedders, Judge)")
+ContainerDb_Ext(pgvector, "PostgreSQL", "pgvector", "Stores document chunks and embeddings")
+Container_Ext(mlflow, "MLflow Tracking Server", "Python", "Logs runs, metrics, detailed results")
 
+' Pin external elements (must be declared after the boundary)
+Lay_R(evaluator, mlflow)
+Lay_R(reranker, lmstudio)
+Lay_D(db_adapter, pgvector)
+
+' --- 1. Entry Points & Evaluation Flow ---
+Rel_D(evaluator, guardrails, "Feeds golden set")
+Rel_D(evaluator, mlflow, "Logs runs & metrics")
+Rel_D(evaluator, lmstudio, "LLM-as-a-Judge")
+
+Rel_D(ingest, llm_client, "Embeds chunks")
+Rel_D(ingest, db_adapter, "Saves chunks")
+
+' --- 2. Guardrails & RAG Flow ---
 Rel_D(user, guardrails, "Asks questions")
-Rel_D(evaluator, orchestrator, "Feeds Golden Set for testing")
-Rel_R(guardrails, orchestrator, "Triggers RAG action if safe")
+Rel_D(guardrails, rag_orch, "Triggers if safe")
+Rel_D(guardrails, lmstudio, "Intent matching")
 
-Rel_D(guardrails, lmstudio, "Intent matching & Safety checks")
-Rel_D(orchestrator, lmstudio, "Embeddings & Generation")
-Rel_D(orchestrator, pgvector, "Hybrid Similarity Search")
+Rel_D(rag_orch, retriever, "Requests context")
+Rel_D(rag_orch, lmstudio, "Generates answer")
+
+' --- 3. Retrieval & Reranking Flow ---
+Rel_D(retriever, reranker, "Re-ranks chunks")
+Rel_D(retriever, db_adapter, "Fetches chunks")
+Rel_D(retriever, lmstudio, "Embeds query")
+
+Rel_D(reranker, lmstudio, "Scores chunks")
+
+' --- 4. Shared Adapters to Infrastructure ---
+Rel_D(llm_client, lmstudio, "API calls")
+Rel_D(db_adapter, pgvector, "Reads/Writes")
 
 @enduml

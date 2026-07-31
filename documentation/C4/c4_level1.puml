@@ -10,13 +10,16 @@ LAYOUT_TOP_DOWN()
 title System Context Diagram: Enterprise RAG Architecture
 
 Person(user, "User", "A user interacting with the AI assistant")
-System(rag_system, "AI RAG System", "Intercepts prompts, retrieves context, and securely generates answers")
+
+System(rag_system, "AI RAG System", "Ingests EMAR documents, retrieves context, applies safety guardrails, and evaluates answers with an LLM judge")
 
 System_Ext(lmstudio, "LM Studio Server", "Local LLM execution environment (Generators, Embedders, Judges)")
-SystemDb_Ext(pgvector, "PostgreSQL (PGVector)", "Stores and searches high-dimensional embeddings")
+SystemDb_Ext(pgvector, "PostgreSQL (PGVector)", "Stores and searches document chunks and embeddings")
+System_Ext(mlflow, "MLflow Tracking Server", "Logs evaluation runs, metrics, and detailed results")
 
 Rel_D(user, rag_system, "Asks questions", "Text")
 Rel_D(rag_system, lmstudio, "Sends prompts & data", "REST API")
 Rel_D(rag_system, pgvector, "Queries for context", "SQL / Vectors")
+Rel_D(rag_system, mlflow, "Logs evaluation metrics", "HTTP")
 
 @enduml
