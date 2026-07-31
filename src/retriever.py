@@ -1,8 +1,12 @@
 """Hybrid retrieval over pgvector.
 
-Retrieves the most relevant document chunks for a query by combining
-vector-cosine search with full-text search, with an optional LLM-based
-re-ranking pass. Results are cached per ``(query, top_k, rerank_model)``.
+**Cycle role — Stage 2 of 4 (RETRIEVE).** Retrieves the most relevant document
+chunks for a query by combining vector-cosine search with full-text search, with
+an optional LLM-based re-ranking pass. Results are cached per
+``(query, top_k, rerank_model)``.
+
+Consumes the corpus written by INGEST (``ingest.py``) and feeds the context used
+by GUARDRAILS/RAG (``guardrails.py``/``rag.py``) and EVALUATE (``evaluate.py``).
 """
 
 import os
@@ -56,6 +60,9 @@ def retrieve_context(
 
     Raises:
         psycopg.Error: If the hybrid search query itself fails.
+
+    Pipeline trace: called by :func:`rag.ask_rag` for every generation; runs
+    once per query inside the evaluation loop (``evaluate.py``).
     """
     cache_key = f"{query}:{top_k}:{rerank_model}"
     if cache_key in _RETRIEVAL_CACHE:
@@ -64,9 +71,13 @@ def retrieve_context(
     cfg = config or RetrieverConfig()
     limit = top_k if top_k is not None else cfg.top_k
 
+    # STAGE 2a: QUERY EMBEDDING — project the query into the same vector space
+    # that INGEST used, so cosine distance is meaningful.
     embedder = LMStudioModelEmbedder(cfg.embedding_model_name)
     query_embedding = embedder.embed(query)
 
+    # STAGE 2b: HYBRID SEARCH — RRF fusion of vector + full-text results against
+    # the chunks persisted by INGEST.
     try:
         with db.get_db_connection() as conn, conn.cursor() as cur:
             results = db.search_chunks_hybrid(cur, query_embedding, query, limit)
@@ -74,6 +85,8 @@ def retrieve_context(
         print(f"[ERROR] Database failure during context retrieval: {err}")
         results = []
 
+    # STAGE 2c: RE-RANK (optional) — an LLM re-scores the fused chunks to lift
+    # the most relevant context to the top before it reaches the generator.
     if results and rerank_model:
         results = rerank(query, results, rerank_model)
 

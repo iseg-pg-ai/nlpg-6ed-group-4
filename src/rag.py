@@ -1,9 +1,16 @@
 """Retrieval-Augmented Generation (RAG) orchestration.
 
+**Cycle role — Stage 3c of 4 (RAG, the generation action inside GUARDRAILS).**
 Builds a context-anchored system prompt from retrieved chunks and queries a
-local LLM via LM Studio. Includes optional query rewriting and a rewritten-query
-cache. The system prompt positions the model as an expert aeronautical engineer
-specialized in EMAR regulations and forbids answering outside the context.
+local LLM via LM Studio. Includes optional query rewriting and a
+rewritten-query cache. The system prompt positions the model as an expert
+aeronautical engineer specialized in EMAR regulations and forbids answering
+outside the context.
+
+Pipeline trace: called by the guardrails ``run_rag_action`` (``guardrails.py``)
+after RETRIEVE (``retriever.py``) has selected context; the generated answer and
+its context are returned to the guardrails stage and, ultimately, to EVALUATE
+(``evaluate.py``).
 """
 
 import os
@@ -114,6 +121,10 @@ def ask_rag(
         A dictionary with keys ``answer`` (the generated answer string),
         ``context`` (the retrieved chunks used), and ``model`` (the generator
         model name).
+
+    Pipeline trace: the inner generation stage of the cycle. Guardrails
+    (``guardrails.py``) calls this for valid queries; it in turn calls
+    ``retriever.retrieve_context`` and feeds the results to the LLM.
     """
     retrieval_query = rewrite_query(query, rewrite_model)
     if retrieval_query != query:
@@ -121,6 +132,7 @@ def ask_rag(
 
     print(f"[RAG] Retrieving context for query: '{retrieval_query}'...")
 
+    # STAGE 3c-i: RETRIEVE — pull the top chunks from pgvector (see retriever.py).
     contexts = retriever.retrieve_context(retrieval_query, rerank_model=rerank_model)
 
     if not contexts:  # Check if we got any context (basic guardrail)
@@ -130,11 +142,14 @@ def ask_rag(
             "model": model_name,
         }
 
+    # STAGE 3c-ii: GROUND — bind the retrieved chunks into the system prompt so
+    # the model can only answer from the documents.
     system_message = build_prompt(contexts)
 
     llm = LMStudioModel(model_name)
     print(f"[RAG] Sending prompt to {model_name}...")
     try:
+        # STAGE 3c-iii: GENERATE — the actual LLM call that produces the answer.
         response = llm.generate(  # Query the local LLM
             messages=[
                 {"role": "system", "content": system_message},

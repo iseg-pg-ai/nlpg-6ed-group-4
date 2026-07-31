@@ -1,9 +1,13 @@
 """Document ingestion into pgvector.
 
-Reads PDF/TXT documents from the data directory, splits them into
-sentence-aligned chunks, embeds the chunks in batches via LM Studio, and stores
-them in the pgvector database. Includes a failsafe for huge unpunctuated blocks
-commonly found in PDFs.
+**Cycle role — Stage 1 of 4 (INGEST).** Reads PDF/TXT documents from the data
+directory, splits them into sentence-aligned chunks, embeds the chunks in
+batches via LM Studio, and stores them in the pgvector database. Includes a
+failsafe for huge unpunctuated blocks commonly found in PDFs.
+
+This stage produces the corpus that every downstream stage consumes:
+``document_chunks`` rows (source_file + content + embedding) queried later by
+the retriever. The cycle continues with RETRIEVE (``retriever.py``).
 """
 
 import os
@@ -164,20 +168,24 @@ def run_ingestion(reset_db: bool = True, config: IngestConfig | None = None) -> 
 
     with db.get_db_connection() as conn:
         if reset_db:
+            # Fresh start: drop any previous corpus so the run is reproducible.
             db.clear_database(conn)
 
+        # Ensure the schema + indexes exist before writing any chunk.
         db.setup_database(conn)
 
         with conn.cursor() as cur:
             for file_path in all_files:
                 file_name = file_path.name
 
+                # Incremental mode: skip files already present in the corpus.
                 if not reset_db and db.is_file_ingested(conn, file_name):
                     print(f"Skipping {file_name!r}: Already ingested.")
                     continue
 
                 print(f"Processing {file_name!r}...")
 
+                # STAGE 1a: EXTRACT — raw document → plain text.
                 try:
                     match file_path.suffix.lower():
                         case ".pdf":
@@ -195,12 +203,15 @@ def run_ingestion(reset_db: bool = True, config: IngestConfig | None = None) -> 
                     print(f"[WARNING] No readable text found in {file_name!r}. Skipping.")
                     continue
 
+                # STAGE 1b: CHUNK — text → sentence-aligned chunks (~500 chars).
                 chunks = [c for c in chunk_text(text, cfg.chunk_size, cfg.chunk_overlap) if c.strip()]
 
                 if not chunks:
                     continue
 
+                # STAGE 1c: EMBED — all chunks in one batched API call.
                 embeddings = embedder.embed_batch(chunks)
+                # STAGE 1d: PERSIST — (source_file, chunk, embedding) → pgvector.
                 records = [(file_name, chunk, emb) for chunk, emb in zip(chunks, embeddings)]
                 db.insert_chunks_batch(cur, records)
 

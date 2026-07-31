@@ -1,10 +1,16 @@
 """NeMo Guardrails integration.
 
-Wraps NeMo Guardrails with Colang rules defined in ``nemo_config/`` and
-delegates valid EMAR questions to the RAG pipeline. A temporary config directory
-is generated with environment variables substituted inline so that the global
-``os.environ`` is never mutated, and ``fastembed`` is required at runtime for
-embeddings-only intent matching.
+**Cycle role — Stage 3 of 4 (GUARDRAILS).** Wraps NeMo Guardrails with Colang
+rules defined in ``nemo_config/`` and delegates valid EMAR questions to the RAG
+pipeline. A temporary config directory is generated with environment variables
+substituted inline so that the global ``os.environ`` is never mutated, and
+``fastembed`` is required at runtime for embeddings-only intent matching.
+
+Pipeline trace: sits between RETRIEVE (``retriever.py``) and EVALUATE
+(``evaluate.py``). Each ``ask()`` classifies the user intent against the guardrail
+flows; a blocked intent is answered directly, otherwise the ``run_rag_action``
+executes the RAG stage and the answer + retrieved context are returned to the
+caller.
 """
 
 import asyncio
@@ -147,6 +153,9 @@ class GuardrailsPipeline:
         app = LLMRails(rails_config)
 
         async def run_rag_action(query: str) -> str:
+            # STAGE 3c: RAG EXECUTION — the Colang flow calls this custom action.
+            # Delegates to rag.ask_rag (query rewrite → retriever → LLM) and
+            # captures the retrieved chunks so evaluate can score faithfulness.
             result = rag.ask_rag(query, model_name=self.model_name)
             self.last_context = result.get("context", [])
             return result.get("answer", "")
@@ -174,9 +183,17 @@ class GuardrailsPipeline:
         """
         self.clear_context()  # Reset context state for each new query
 
+        # STAGE 3a: INTENT MATCHING — NeMo compares the user message against
+        # the Colang flows using embeddings (embeddings_only). If it matches a
+        # refusal flow (politics/illegal/toxicity/classified/jailbreak), the
+        # bot responds directly and the RAG action never runs.
         print(f"\n[USER]: {user_query}")
         response = await self.app.generate_async(messages=[{"role": "user", "content": user_query}])
 
+        # STAGE 3b: RESPONSE — either the guardrail refusal text, or the answer
+        # produced by run_rag_action (which delegates to rag.ask_rag, which in
+        # turn calls retriever.retrieve_context). last_context holds whatever
+        # chunks the RAG action retrieved.
         bot_message: str
         match response:
             case {"content": str() as msg}:

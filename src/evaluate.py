@@ -1,10 +1,14 @@
 """Two-phase LLM evaluation with MLflow logging.
 
-Phase 1 generates answers for every golden-set query across each configured
-model and temperature through the guardrails pipeline. Phase 2 scores the
-answers with DeepEval metrics (faithfulness, answer relevancy, and a custom
-lexical overlap) using a local judge model, then logs the aggregated and
-per-query results to MLflow.
+**Cycle role — Stage 4 of 4 (EVALUATE).** Phase 1 generates answers for every
+golden-set query across each configured model and temperature through the
+guardrails pipeline. Phase 2 scores the answers with DeepEval metrics
+(faithfulness, answer relevancy, and a custom lexical overlap) using a local
+judge model, then logs the aggregated and per-query results to MLflow.
+
+Pipeline trace: drives the whole cycle per ``(model, temperature)`` run — each
+query flows EVALUATE → GUARDRAILS (``guardrails.py``) → RAG (``rag.py``) →
+RETRIEVE (``retriever.py``), and the answer + context come back for scoring.
 """
 
 import asyncio
@@ -106,6 +110,10 @@ async def generate_batch_answers(
 
     Returns:
         A list of :class:`BatchItem` results, one per dataset entry.
+
+    Pipeline trace: the per-query driving loop of EVALUATE — every dataset entry
+    is sent through ``pipeline.ask`` (guardrails → RAG → retriever), and the
+    answer plus retrieved context are collected for Phase 2 scoring.
     """
     results: list[BatchItem] = []
 
@@ -157,18 +165,24 @@ def run_evaluation(config: EvalConfig | None = None) -> None:
         for temp in cfg.temperatures:
             run_name = f"{model.split('/')[-1]}_temp_{temp}"
 
-            # PHASE 1: GENERATION
+            # ==========================================
+            # PHASE 1: GENERATION — run the RAG cycle for every golden-set query
+            # ==========================================
             print(f"\n{'=' * 40}\nPHASE 1: GENERATING ANSWERS FOR {run_name}\n{'=' * 40}")
 
             gen_model = LMStudioModel(model)
             gen_model.load()
 
+            # STAGE 4a: CYCLE — each query goes through guardrails (intent check)
+            # → RAG (retrieve + generate). Context is captured for faithfulness.
             pipeline = GuardrailsPipeline(model)
             batch_results = asyncio.run(generate_batch_answers(pipeline, EVALUATION_DATA))
 
             gen_model.unload()  # Free VRAM before launching judge model
 
+            # ==========================================
             # PHASE 2: EVALUATION (LLM-as-a-Judge)
+            # ==========================================
             print(f"\n{'=' * 40}\nPHASE 2: EVALUATING {run_name} WITH JUDGE: {cfg.judge_model}\n{'=' * 40}")
 
             judge_model = LMStudioModel(cfg.judge_model)
@@ -191,6 +205,8 @@ def run_evaluation(config: EvalConfig | None = None) -> None:
                 detailed_results: list[dict[str, Any]] = []
 
                 for data in batch_results:
+                    # STAGE 4b: SCORE — reconstruct the test case from Phase 1
+                    # (answer + retrieval context) and measure it with each metric.
                     test_case = LLMTestCase(
                         input=data["query"],
                         actual_output=data["answer"],
@@ -228,7 +244,9 @@ def run_evaluation(config: EvalConfig | None = None) -> None:
                     except (ValueError, TypeError, AssertionError, RuntimeError) as err:
                         print(f"[WARNING] DeepEval scoring failed: {err}")
 
-                # Aggregate and log averages
+                # STAGE 4c: AGGREGATE & LOG — average the per-query scores and
+                # ship both the metrics and the detailed table to MLflow for the
+                # current (model, temperature) run.
                 avg_faithfulness = 0.0
                 avg_relevancy = 0.0
                 avg_overlap = 0.0
