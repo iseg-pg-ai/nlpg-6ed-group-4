@@ -64,7 +64,7 @@ class EvalConfig:
     tracking_uri: str = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
     model_a: str = os.getenv("MODEL_A", "ministral-3-3b-instruct-2512")
     model_b: str = os.getenv("MODEL_B", "qwen3.5-2b")
-    judge_model: str = os.getenv("JUDGE_MODEL", "llama-3.2-1b-instruct@q6_k")
+    judge_model: str = os.getenv("JUDGE_MODEL", "deepseek-ai_deepseek-r1-0528-qwen3-8b")
     embedding_model: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
     temperatures: tuple[float, ...] = (0.0, 0.5, 1, 1.5, 2)
     experiment_name: str = "NLPG_RAG_Evaluation"
@@ -93,7 +93,7 @@ def check_mlflow_server(tracking_uri: str) -> None:
         print("DeepEval cannot log metrics because MLflow is not running.")
         print("\nPlease open a new terminal window and run this command:")
         print("uvx mlflow server --host 127.0.0.1 --port 5000")
-        print("\nThen try running main.py again.")
+        print("\nThen try running `uv run python -m src` again.")
         print("=" * 60 + "\n")
         sys.exit(1)
 

@@ -14,16 +14,18 @@ def rerank(query: str, chunks: list[str], model_name: str | None = None, top_k: 
     """Re-rank chunks by asking an LLM to score each for relevance to the query.
 
     Chunks with only a single element are returned unchanged. If ``model_name``
-    is None, lexical scoring is used instead of the LLM.
+    is None, lexical scoring is used instead of the LLM. Only the ``top_k``
+    highest-scoring chunks are kept.
 
     Args:
         query: The user query used as the relevance reference.
         chunks: The retrieved chunks to re-rank.
         model_name: Optional LLM model name used for scoring; falls back to
             lexical scoring when None.
+        top_k: Maximum number of chunks to return after re-ranking.
 
     Returns:
-        The chunks sorted by descending relevance to the query.
+        The top ``top_k`` chunks sorted by descending relevance to the query.
     """
     if len(chunks) <= 1:
         return chunks

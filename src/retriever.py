@@ -3,7 +3,7 @@
 **Cycle role — Stage 2 of 4 (RETRIEVE).** Retrieves the most relevant document
 chunks for a query by combining vector-cosine search with full-text search, with
 an optional LLM-based re-ranking pass. Results are cached per
-``(query, top_k, rerank_model)``.
+``(query, retrieval_top_k, rerank_top_k, rerank_model)``.
 
 Consumes the corpus written by INGEST (``ingest.py``) and feeds the context used
 by GUARDRAILS/RAG (``guardrails.py``/``rag.py``) and EVALUATE (``evaluate.py``).
@@ -30,7 +30,10 @@ class RetrieverConfig:
 
     Attributes:
         embedding_model_name: Model used to embed the query before searching.
-        top_k: Default number of chunks to return when no explicit limit is given.
+        retrieval_top_k: Number of chunks fetched from the database before
+            any re-ranking.
+        rerank_top_k: Number of chunks returned after re-ranking; also the
+            cap applied when no re-ranker model is configured.
     """
 
     embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
@@ -49,11 +52,14 @@ def retrieve_context(
 
     Embeds the query, runs a hybrid vector + full-text search, optionally
     re-ranks the results with an LLM, and returns the top chunks. Results are
-    cached keyed by ``query:top_k:rerank_model``.
+    cached keyed by ``query:retrieval_top_k:rerank_top_k:rerank_model``.
 
     Args:
         query: The user query to search for.
-        top_k: Number of chunks to return; defaults to ``config.top_k``.
+        retrieval_k: Number of chunks to fetch from the database; defaults to
+            ``config.retrieval_top_k``.
+        rerank_k: Number of chunks to return after re-ranking; defaults to
+            ``config.rerank_top_k``.
         config: Retriever settings; uses environment-derived defaults if None.
         rerank_model: If provided, re-rank results with this LLM model.
 

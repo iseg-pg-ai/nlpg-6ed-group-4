@@ -13,7 +13,7 @@ puppeteer:
 
 **Guia de exploração do código**
 
-Este documento descreve o funcionamento do projeto do início ao fim: o **ciclo do pipeline RAF**. 
+Este documento descreve o funcionamento do projeto do início ao fim: o **ciclo do pipeline RAG**. 
 Cada etapa (ou *stage*) tem um número (1 a 4) e cada sub-etapa tem uma letra (ex.: `3c`).
 
 Quando virem estas referências no código (como comentários `# STAGE 3c-i`) ou neste documento, elas apontam sempre para o ficheiro onde aquele passo está implementado.
@@ -97,7 +97,7 @@ Uma LLM não lê texto como nós. Para ela, um documento é uma lista de número
 |:------:|------|-----------|
 | `2a` | **QUERY EMBEDDING** | Converte a pergunta num vetor, usando o mesmo modelo de embedding da Etapa 1. |
 | `2b` | **HYBRID SEARCH** | Pesquisa de duas formas em paralelo e combina os resultados (RRF). |
-| `2c` | **RE-RANK** (opcional) | Uma LLM volta a ordenar os resultados para pôr os melhores primeiro. |
+| `2c` | **RE-RANK** (opcional) | Uma LLM volta a ordenar os resultados para pôr os melhores primeiro. Devido aos dois `top_k` separados (`retrieval_top_k` de procura na BD e `rerank_top_k` devolvido após o re-rank), sem modelo de re-rank o resultado é apenas truncado a `rerank_top_k`. |
 
 ### O que é "pesquisa híbrida" (2b)?
 
@@ -117,7 +117,7 @@ A combinação usa **RRF** (*Reciprocal Rank Fusion*): dá pontos por posição 
    `search_chunks_fts()`)
 3. **`2c` — RE-RANK** → `rerank()` em `src/reranker.py`
 
-A função pública que orquestra tudo é `retrieve_context()` em `src/retriever.py`. Os resultados são **guardados em cache** (memória) por pergunta, para não repetir pesquisas iguais.
+A função pública que orquestra tudo é `retrieve_context()` em `src/retriever.py`. Os resultados são **guardados em cache** (memória) por pergunta, para não repetir pesquisas iguais — a chave da cache inclui a pergunta, os dois `top_k` e o modelo de re-rank.
 
 **Ligação à etapa seguinte:** os pedaços/chunks recuperados são o "contexto" que vai ser entregue à LLM para ela responder.
 
