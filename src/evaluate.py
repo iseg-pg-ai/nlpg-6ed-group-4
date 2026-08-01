@@ -186,7 +186,7 @@ def run_evaluation(config: EvalConfig | None = None) -> None:
             print(f"\n{'=' * 40}\nPHASE 2: EVALUATING {run_name} WITH JUDGE: {cfg.judge_model}\n{'=' * 40}")
 
             judge_model = LMStudioModel(cfg.judge_model)
-            judge_model.load()
+            judge_model.load(context_length=8192)
 
             local_judge = LMStudioJudge(model_name=cfg.judge_model)
             faithfulness_metric = FaithfulnessMetric(threshold=0.5, model=local_judge)

@@ -66,7 +66,7 @@ class LMStudioConfig:
 _session = requests.Session()
 
 
-def json_post(url: str, payload: dict[str, Any], timeout: float = 10.0) -> requests.Response:
+def json_post(url: str, payload: dict[str, Any], timeout: float = 600.0) -> requests.Response:
     """Issue a POST request with a JSON payload and a default timeout safeguard.
 
     Args:
@@ -148,7 +148,7 @@ class LMStudioModel:
         self,
         messages: list[dict[str, Any]],
         temperature: float = 0.0,
-        max_tokens: int = 500,
+        max_tokens: int = 4096,
         response_format: dict[str, Any] | None = None,
     ) -> Any:
         """Generate a chat completion, optionally with structured JSON mode.
@@ -185,7 +185,7 @@ class LMStudioModel:
         print("[SYSTEM] Checking for currently loaded models...")
 
         try:
-            response = _session.get(cfg.get_all_models_url, timeout=10)
+            response = _session.get(cfg.get_all_models_url, timeout=600)
         except requests.exceptions.ConnectionError:
             print("[ERROR] Could not connect to LM Studio. Is the server running?")
             return
