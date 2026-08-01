@@ -90,6 +90,9 @@ class GuardrailsPipeline:
     Args:
         model_name: LLM model used by NeMo for generation.
         config: Guardrails settings; uses environment-derived defaults if None.
+        temperature: Sampling temperature forwarded to the RAG generation
+            action so the evaluation loop's temperature sweep actually reaches
+            the generator.
 
     Attributes:
         last_context: The retrieved context from the most recent RAG action.
@@ -99,9 +102,11 @@ class GuardrailsPipeline:
         self,
         model_name: str,
         config: GuardrailsConfig | None = None,
+        temperature: float = 0.0,
     ) -> None:
         self.model_name = model_name
         self.config = config or GuardrailsConfig.from_env()
+        self.temperature = temperature
         self.last_context: list[str] = []
         self._tmp_dir: str | None = None
 
@@ -156,7 +161,9 @@ class GuardrailsPipeline:
             # STAGE 3c: RAG EXECUTION — the Colang flow calls this custom action.
             # Delegates to rag.ask_rag (query rewrite → retriever → LLM) and
             # captures the retrieved chunks so evaluate can score faithfulness.
-            result = rag.ask_rag(query, model_name=self.model_name)
+            # The sampling temperature is forwarded so the evaluate loop's
+            # temperature sweep is actually applied during generation.
+            result = rag.ask_rag(query, model_name=self.model_name, temperature=self.temperature)
             self.last_context = result.get("context", [])
             return result.get("answer", "")
 

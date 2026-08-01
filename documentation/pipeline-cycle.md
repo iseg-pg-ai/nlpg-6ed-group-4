@@ -213,7 +213,7 @@ Inclui perguntas:
 
 ### Parâmetros testados
 
-O sistema testa **2 modelos** (Ministral 3B e Qwen 3.5 2B) a **5 temperaturas** (`0.0, 0.5, 1, 1.5, 2`). Temperatura mais baixa = resposta mais determinística; mais alta = mais criativa (mas com mais risco de inventar). Isto permite estudar o trade-off entre fidelidade e criatividade.
+O sistema testa **2 modelos** (Ministral 3B e Qwen 3.5 2B) a **3 temperaturas** (`0.0, 1.0, 2.0`). Temperatura mais baixa = resposta mais determinística; mais alta = mais criativa (mas com mais risco de inventar). Isto permite estudar o trade-off entre fidelidade e criatividade.
 
 ### Fluxo (com ficheiro)
 

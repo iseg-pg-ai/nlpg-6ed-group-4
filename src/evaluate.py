@@ -66,7 +66,7 @@ class EvalConfig:
     model_b: str = os.getenv("MODEL_B", "qwen3.5-2b")
     judge_model: str = os.getenv("JUDGE_MODEL", "deepseek-ai_deepseek-r1-0528-qwen3-8b")
     embedding_model: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
-    temperatures: tuple[float, ...] = (0.0, 0.5, 1, 1.5, 2)
+    temperatures: tuple[float, ...] = (0.0, 1.0, 2.0)
     experiment_name: str = "NLPG_RAG_Evaluation"
 
     @property
@@ -175,7 +175,9 @@ def run_evaluation(config: EvalConfig | None = None) -> None:
 
             # STAGE 4a: CYCLE — each query goes through guardrails (intent check)
             # → RAG (retrieve + generate). Context is captured for faithfulness.
-            pipeline = GuardrailsPipeline(model)
+            # The temperature is threaded through the pipeline so the sweep
+            # actually reaches the generator (see guardrails.GuardrailsPipeline).
+            pipeline = GuardrailsPipeline(model, temperature=temp)
             batch_results = asyncio.run(generate_batch_answers(pipeline, EVALUATION_DATA))
 
             gen_model.unload()  # Free VRAM before launching judge model
