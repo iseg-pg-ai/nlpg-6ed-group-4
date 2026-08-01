@@ -5,6 +5,7 @@ skinparam class {
     ArrowColor DarkSlateGray
     BorderColor DarkBlue
 }
+
 package "src.__main__" as src.__main__ {
 }
 package "src.evaluate" as src.evaluate {
@@ -12,6 +13,8 @@ package "src.evaluate" as src.evaluate {
 package "src.golden_set" as src.golden_set {
 }
 package "src.guardrails" as src.guardrails {
+}
+package "src.helpers" as src.helpers {
 }
 package "src.helpers.db_utils" as src.helpers.db_utils {
 }
@@ -28,10 +31,7 @@ package "src.reranker" as src.reranker {
 package "src.retriever" as src.retriever {
 }
 src.__main__ --> src.evaluate
-src.__main__ --> src.guardrails
 src.__main__ --> src.ingest
-src.__main__ --> src.rag
-src.__main__ --> src.retriever
 src.evaluate --> src.golden_set
 src.evaluate --> src.guardrails
 src.evaluate --> src.helpers.eval_utils
