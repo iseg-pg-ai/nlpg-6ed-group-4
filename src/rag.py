@@ -1,0 +1,229 @@
+"""Retrieval-Augmented Generation (RAG) orchestration.
+
+**Cycle role — Stage 3c of 4 (RAG, the generation action inside GUARDRAILS).**
+Builds a context-anchored system prompt from retrieved chunks and queries a
+local LLM via LM Studio. Includes optional query rewriting and a
+rewritten-query cache. The system prompt positions the model as an expert
+aeronautical engineer specialized in EMAR regulations and forbids answering
+outside the context.
+
+Pipeline trace: called by the guardrails ``run_rag_action`` (``guardrails.py``)
+after RETRIEVE (``retriever.py``) has selected context; the generated answer and
+its context are returned to the guardrails stage and, ultimately, to EVALUATE
+(``evaluate.py``).
+"""
+
+import os
+
+from dotenv import load_dotenv
+from openai import OpenAIError
+
+import retriever
+from helpers.lm_studio_utils import LMStudioModel, LMStudioModelEmbedder
+
+load_dotenv(override=True)  # Load environment variables
+
+_QUERY_CACHE: dict[str, str] = {}
+
+
+def rewrite_query(query: str, model_name: str | None = None) -> str:
+    """Rewrite a user query to be more effective for retrieval.
+
+    Rewrites are cached per original query. Returns the rewritten query, or the
+    original if no model is available or rewriting fails.
+
+    Args:
+        query: The original user query.
+        model_name: Optional LLM model used for rewriting; if None, the original
+            query is returned unchanged.
+
+    Returns:
+        The rewritten query, or the original query when rewriting is skipped
+        or fails.
+    """
+    if model_name is None:
+        return query
+
+    cache_key = f"rewrite:{query}"
+    if cache_key in _QUERY_CACHE:
+        return _QUERY_CACHE[cache_key]
+
+    prompt = (
+        "Rewrite the following question to be more specific and searchable "
+        "for finding relevant documents. Return only the rewritten question, nothing else.\n\n"
+        f"Original: {query}\n\nRewritten:"
+    )
+
+    try:
+        llm = LMStudioModel(model_name)
+        response = llm.generate(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=100,
+        )
+        rewritten = (response.choices[0].message.content or "").strip()
+        result = rewritten if rewritten else query
+    except (ValueError, RuntimeError, OpenAIError):
+        result = query  # Fallback to original query if we failed to rewrite
+
+    _QUERY_CACHE[cache_key] = result
+    return result
+
+
+def build_prompt(context_chunks: list[str]) -> str:
+    """Construct the system prompt strictly enforcing the retrieved context.
+
+    Joins the context chunks and wraps them in an EMAR-expert system prompt
+    that instructs the model to answer only from the provided context and to
+    respond with a fixed fallback message when the answer is not found.
+
+    Args:
+        context_chunks: The retrieved document chunks to ground the answer on.
+
+    Returns:
+        The fully assembled system prompt string.
+    """
+    context_str = "\n\n---\n\n".join(context_chunks)
+    system_prompt = (
+        "You are an expert aeronautical engineer specialized in EMAR regulations. "
+        "Your task is to answer briefly the user's question using **ONLY** the information provided in the context below.\n\n"
+        "CRITICAL INSTRUCTIONS:\n"
+        "1. If the answer cannot be found in the context, you MUST reply exactly with: "
+        "'I do not have enough information to answer this based on the retrieved documents.' Do not add any other words.\n"
+    )
+    return system_prompt + f"CONTEXT:\n{context_str}"
+
+
+def ask_rag(
+    query: str,
+    model_name: str,
+    temperature: float = 0.0,
+    rewrite_model: str | None = None,
+    rerank_model: str | None = None,
+) -> dict:
+    """
+    Orchestrate the Retrieval-Augmented Generation pipeline.
+
+    Optionally rewrites the query, retrieves context chunks (optionally
+    re-ranked), builds the context-grounded prompt, and queries the local LLM.
+    Handles reasoning-token models (e.g. Qwen distills), empty responses, and
+    connection errors with safe fallbacks.
+
+    Args:
+        query: The user question to answer.
+        model_name: The LLM model name used for generation.
+        temperature: Sampling temperature; 0.0 is best for factual RAG.
+        rewrite_model: Optional model name used to rewrite the query before
+            retrieval.
+        rerank_model: Optional model name used to re-rank retrieved chunks.
+
+    Returns:
+        A dictionary with keys ``answer`` (the generated answer string),
+        ``context`` (the retrieved chunks used), and ``model`` (the generator
+        model name).
+
+    Pipeline trace: the inner generation stage of the cycle. Guardrails
+    (``guardrails.py``) calls this for valid queries; it in turn calls
+    ``retriever.retrieve_context`` and feeds the results to the LLM.
+    """
+    retrieval_query = rewrite_query(query, rewrite_model)
+    if retrieval_query != query:
+        print(f"[RAG] Rewrote query '{query}' → '{retrieval_query}'")
+
+    print(f"[RAG] Retrieving context for query: '{retrieval_query}'...")
+
+    # STAGE 3c-i: RETRIEVE — pull the top chunks from pgvector (see retriever.py).
+    contexts = retriever.retrieve_context(retrieval_query, rerank_model=rerank_model)
+
+    if not contexts:  # Check if we got any context (basic guardrail)
+        return {
+            "answer": "No relevant documents were found in the database.",
+            "context": [],
+            "model": model_name,
+        }
+
+    # STAGE 3c-ii: GROUND — bind the retrieved chunks into the system prompt so
+    # the model can only answer from the documents.
+    system_message = build_prompt(contexts)
+
+    llm = LMStudioModel(model_name)
+    print(f"[RAG] Sending prompt to {model_name}...")
+    try:
+        # STAGE 3c-iii: GENERATE — the actual LLM call that produces the answer.
+        response = llm.generate(  # Query the local LLM
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": query},
+            ],
+            temperature=temperature,  # 0.0 is best for factual RAG to prevent creativity/hallucination
+            max_tokens=500,
+        )
+
+        message = response.choices[0].message
+
+        # Convert the strict Pydantic model into a normal dictionary to bypass strict typing
+        message_dict = message.model_dump()
+
+        answer = message_dict.get("content") or ""  # Safely extract standard content
+        reasoning = message_dict.get("reasoning_content")  # check for reasoning_content (Qwen-distils models)
+        if reasoning:
+            print("[SYSTEM] Reasoning tokens detected!")  # Append the reasoning answer so you can see both
+            answer = f"<thought_process>\n{reasoning}\n</thought_process>\n\n{answer}"
+
+        if not answer.strip():  # 3. Fallback: Did it still return nothing?
+            print("[WARNING] The model returned an empty string.")
+            if message_dict.get("tool_calls"):
+                answer = "[ERROR: The model attempted a tool call instead of answering.]"
+            else:
+                answer = "[ERROR: Empty response. If using Qwen, ensure LMStudio is set to the 'ChatML' prompt format!]"
+
+    except (ValueError, RuntimeError, OpenAIError) as e:
+        print(f"[ERROR] Failed to connect to LLM: {e}")
+        print("Make sure llama.cpp or LMStudio server is running!")
+        answer = "Error generating response."
+
+    # 4. Return BOTH answer and context, returning the context is crucial to evaluate
+    return {"answer": answer, "context": contexts, "model": model_name}
+
+
+def test_rag(test_query: str) -> None:
+    """Test the RAG pipeline manually with both configured models.
+
+    Loads the embedder plus each model in turn, asks the query through
+    :func:`ask_rag`, prints the answers, and unloads VRAM between switches.
+
+    Args:
+        test_query: The question to ask both models.
+
+    Raises:
+        RuntimeError: If the LM Studio / llama.cpp server is not running.
+    """
+    # Ensure your llama.cpp/LMStudio server is running before executing this!
+    model_a = os.getenv("MODEL_A", "ministral-3-3b-instruct-2512")
+    model_b = os.getenv("MODEL_B", "qwen3.5-2b")
+    embed_model = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
+
+    LMStudioModel.unload_all()
+
+    LMStudioModelEmbedder(embed_model).load()  # Load CPU embedder
+    LMStudioModel(model_a).load()  # Load GPU LLM
+    print(f"--- Testing RAG Pipeline with {model_a} ---")
+    result = ask_rag(test_query, model_a)
+    print(f"\n=== FINAL ANSWER WITH {model_a} ===")
+    print(result["answer"])
+    LMStudioModel(model_a).unload()
+
+    LMStudioModel.unload_all()
+    LMStudioModelEmbedder(embed_model).load()  # Reload CPU embedder
+    LMStudioModel(model_b).load()  # Load GPU LLM
+    print(f"--- Testing RAG Pipeline with {model_b} ---")
+    result = ask_rag(test_query, model_b)
+    print(f"\n=== FINAL ANSWER WITH {model_b} ===")
+    print(result["answer"])
+    LMStudioModel(model_b).unload()
+
+
+if __name__ == "__main__":
+    test_rag(
+        "According to EMAR 66 Appendix I, what is the required level of knowledge for 'Electronic Displays' for a Category B2 licence?"
+    )

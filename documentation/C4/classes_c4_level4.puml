@@ -1,0 +1,285 @@
+@startuml classes_c4_level4
+set namespaceSeparator none
+skinparam linetype ortho
+skinparam nodesep 60
+skinparam class {
+    BackgroundColor LightBlue
+    ArrowColor DarkSlateGray
+    BorderColor DarkBlue
+}
+class "BaseGuardrails" as nemoguardrails.base_guardrails.BaseGuardrails {
+  config : RailsConfig
+  {abstract}generate()
+  {abstract}generate_async()
+  {abstract}stream_async()
+}
+class "BaseMetric" as deepeval.metrics.base_metric.BaseMetric {
+  async_mode : bool
+  error : Optional[str]
+  evaluation_cost : Optional[float]
+  evaluation_model : Optional[str]
+  include_reason : bool
+  input_tokens : Optional[int]
+  model : Optional[DeepEvalBaseLLM]
+  output_tokens : Optional[int]
+  reason : Optional[str]
+  requires_trace : bool
+  score : Optional[float]
+  score_breakdown : Optional[Dict]
+  skipped : bool
+  strict_mode : bool
+  success : Optional[bool]
+  threshold : float
+  using_native_model : Optional[bool]
+  verbose_logs : Optional[str]
+  verbose_mode : bool
+  {abstract}a_measure(test_case)
+  {abstract}is_successful()
+  {abstract}measure(test_case)
+}
+class "BatchItem" as src.evaluate.BatchItem {
+  answer : str
+  context : list[str | Any]
+  expected_output : str
+  query : str
+}
+class "DatabaseConfig" as src.helpers.db_utils.DatabaseConfig {
+  conninfo : str
+  dbname : str | None
+  host : str | None
+  password : str | None
+  port : str | None
+  user : str | None
+  vector_dim : int
+  from_env()
+}
+class "DeepEvalBaseLLM" as deepeval.models.base_model.DeepEvalBaseLLM {
+  model
+  name : NoneType
+  {abstract}a_generate()
+  a_generate_with_schema()
+  {abstract}batch_generate()
+  {abstract}generate()
+  generate_with_schema()
+  {abstract}get_model_name()
+  {abstract}load_model()
+  supports_json_mode()
+  supports_log_probs()
+  supports_multimodal()
+  supports_structured_outputs()
+  supports_temperature()
+}
+class "EvalConfig" as src.evaluate.EvalConfig {
+  embedding_model : str
+  experiment_name : str
+  judge_model : str
+  model_a : str
+  model_b : str
+  models : tuple[str, ...]
+  temperatures : tuple[float, ...]
+  tracking_uri : str
+}
+class "Guardrails" as nemoguardrails.guardrails.guardrails.Guardrails {
+  config : RailsConfig
+  events_history_cache : dict
+  explain_info : Optional[ExplainInfo]
+  llm : Optional[LLMModel]
+  passthrough_fn : Optional[Callable]
+  rails_engine : IORails | LLMRails
+  runtime : Runtime
+  use_iorails_engine : bool
+  verbose : bool
+  check(messages, rail_types)
+  check_async(messages, rail_types)
+  explain()
+  generate(prompt, messages)
+  generate_async(prompt, messages)
+  generate_events(events)
+  generate_events_async(events)
+  process_events(events, state, blocking)
+  process_events_async(events, state, blocking)
+  register_action(action, name)
+  register_action_param(name, value)
+  register_embedding_provider(cls, name)
+  register_embedding_search_provider(name, cls)
+  register_filter(filter_fn, name)
+  register_output_parser(output_parser, name)
+  register_prompt_context(name, value_or_fn)
+  shutdown()
+  startup()
+  stream_async(prompt, messages)
+  update_llm(llm)
+}
+class "GuardrailsConfig" as src.guardrails.GuardrailsConfig {
+  api_base : str
+  api_key : str
+  base_url : str
+  config_dir : Path
+  embed_model : str
+  test_model : str
+  from_env()
+}
+class "GuardrailsPipeline" as src.guardrails.GuardrailsPipeline {
+  app
+  config
+  last_context : list[str]
+  model_name : str
+  ask(user_query)
+  clear_context()
+}
+class "GuardrailsResult" as src.guardrails.GuardrailsResult {
+  answer : str
+  context : list[str]
+}
+class "IngestConfig" as src.ingest.IngestConfig {
+  chunk_overlap : int
+  chunk_size : int
+  data_dir : Path
+  embedding_model_name : str
+}
+class "LLMRails" as nemoguardrails.rails.llm.llmrails.LLMRails {
+  config : RailsConfig
+  default_embedding_engine
+  default_embedding_model
+  default_embedding_params
+  embedding_search_providers
+  events_history_cache : dict
+  explain_info
+  kb
+  llm : Optional[LLMModel]
+  llm_generation_actions
+  passthrough_fn
+  runtime : Runtime
+  verbose : bool
+  check(messages, rail_types)
+  check_async(messages, rail_types)
+  explain()
+  generate(prompt, messages, options, state)
+  generate_async(prompt, messages, options, state, streaming_handler)
+  generate_events(events)
+  generate_events_async(events)
+  process_events(events, state, blocking)
+  process_events_async(events, state, blocking)
+  register_action(action, name)
+  register_action_param(name, value)
+  register_embedding_provider(cls, name)
+  register_embedding_search_provider(name, cls)
+  register_filter(filter_fn, name)
+  register_output_parser(output_parser, name)
+  register_prompt_context(name, value_or_fn)
+  stream_async(prompt, messages, options, state, include_metadata, generator, include_generation_metadata)
+  update_llm(llm)
+}
+class "LMStudioConfig" as src.helpers.lm_studio_utils.LMStudioConfig {
+  api_base : str
+  api_key : str
+  base_url : str
+  download_url : str
+  get_all_models_url : str
+  load_model_url : str
+  status_url : str
+  unload_model_url : str
+}
+class "LMStudioJudge" as src.helpers.eval_utils.LMStudioJudge {
+  llm
+  model_name : str
+  a_generate(prompt, schema)
+  generate(prompt, schema)
+  get_model_name()
+  load_model()
+}
+class "LMStudioModel" as src.helpers.lm_studio_utils.LMStudioModel {
+  client
+  config
+  model_name : str
+  generate(messages, temperature, max_tokens, response_format)
+  load(context_length)
+  unload()
+  unload_all(config)
+}
+class "LMStudioModelEmbedder" as src.helpers.lm_studio_utils.LMStudioModelEmbedder {
+  embed(text)
+  embed_batch(texts)
+  load(context_length)
+}
+class "NLPLexicalOverlapMetric" as src.helpers.eval_utils.NLPLexicalOverlapMetric {
+  reason : str | None
+  score : float | None
+  success : bool | None
+  threshold : float
+  a_measure(test_case)
+  is_successful()
+  measure(test_case)
+}
+class "OpenAI" as openai._client.OpenAI {
+  admin : Admin
+  admin_api_key : str | None
+  api_key : str
+  audio : Audio
+  auth_headers : dict[str, str]
+  batches : Batches
+  beta : Beta
+  chat : Chat
+  completions : Completions
+  containers : Containers
+  conversations : Conversations
+  default_headers : dict[str, str | Omit]
+  embeddings : Embeddings
+  evals : Evals
+  files : Files
+  fine_tuning : FineTuning
+  images : Images
+  models : Models
+  moderations : Moderations
+  organization : str | None
+  project : str | None
+  qs : Querystring
+  realtime : Realtime
+  responses : Responses
+  skills : Skills
+  uploads : Uploads
+  vector_stores : VectorStores
+  videos : Videos
+  webhook_secret : str | None
+  webhooks : Webhooks
+  websocket_base_url : str | httpx.URL | None
+  with_options
+  with_raw_response : OpenAIWithRawResponse
+  with_streaming_response : OpenAIWithStreamedResponse
+  workload_identity : WorkloadIdentity | None
+  copy()
+}
+class "RetrieverConfig" as src.retriever.RetrieverConfig {
+  embedding_model_name : str
+  rerank_top_k : int
+  retrieval_top_k : int
+}
+class "SyncAPIClient" as openai._base_client.SyncAPIClient {
+  close()
+  delete(path)
+  get(path)
+  get_api_list(path)
+  is_closed()
+  patch(path)
+  post(path)
+  put(path)
+  request(cast_to, options)
+}
+nemoguardrails.guardrails.guardrails.Guardrails --|> nemoguardrails.base_guardrails.BaseGuardrails
+nemoguardrails.rails.llm.llmrails.LLMRails --|> nemoguardrails.base_guardrails.BaseGuardrails
+openai._client.OpenAI --|> openai._base_client.SyncAPIClient
+src.helpers.eval_utils.LMStudioJudge --|> deepeval.models.base_model.DeepEvalBaseLLM
+src.helpers.eval_utils.NLPLexicalOverlapMetric --|> deepeval.metrics.base_metric.BaseMetric
+src.helpers.lm_studio_utils.LMStudioModelEmbedder --|> src.helpers.lm_studio_utils.LMStudioModel
+src.guardrails.GuardrailsPipeline --> src.guardrails.GuardrailsConfig : config
+src.helpers.lm_studio_utils.LMStudioModel --> src.helpers.lm_studio_utils.LMStudioConfig : config
+src.helpers.lm_studio_utils.LMStudioModel --* src.helpers.eval_utils.LMStudioJudge : llm
+nemoguardrails.guardrails.guardrails.Guardrails --* src.guardrails.GuardrailsPipeline : app
+nemoguardrails.rails.llm.llmrails.LLMRails --* src.guardrails.GuardrailsPipeline : app
+openai._client.OpenAI --* src.helpers.lm_studio_utils.LMStudioModel : client
+hide nemoguardrails.base_guardrails.BaseGuardrails members
+hide nemoguardrails.guardrails.guardrails.Guardrails members
+hide nemoguardrails.rails.llm.llmrails.LLMRails members
+hide openai._client.OpenAI members
+
+@enduml

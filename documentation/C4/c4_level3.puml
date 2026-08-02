@@ -1,0 +1,90 @@
+@startuml level-three
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+' THE MAGIC TRICK: Forces strict 90-degree angles instead of curved spaghetti lines
+skinparam linetype ortho
+skinparam nodesep 100
+
+LAYOUT_TOP_DOWN()
+
+title Component Diagram: Python RAG Application
+
+System_Ext(mlflow, "MLflow Tracking Server", "Python", "Logs evaluation metrics")
+
+Container_Boundary(python_app, "Python RAG Application") {
+
+    ' TOP LAYER (Entry Points)
+    Component(eval_engine, "Evaluation Engine", "evaluate.py", "Stage 4 · Batched 2-pass evaluation, DeepEval scoring, and NLP metrics.")
+    Component(ingest, "Ingestion Pipeline", "ingest.py", "Stage 1 · Reads PDFs/TXTs, chunks text, and orchestrates embedding.")
+
+    ' DATA LAYER (Golden Set)
+    Component(golden_set, "Golden Set", "golden_set.py", "37 EMAR-domain queries + expected answers for evaluation.")
+
+    ' SECOND LAYER
+    Component(guardrails, "Guardrails Engine", "guardrails.py", "Stage 3 · Intercepts intents and enforces conversational security.")
+
+    ' THIRD LAYER (Core Business Logic)
+    Component(rag_orch, "RAG Orchestrator", "rag.py", "Stage 3c · Injects retrieved context into prompts and parses output.")
+    Component(retriever, "Retriever", "retriever.py", "Stage 2 · Translates query to vector, fetches from DB (RRF hybrid search).")
+    Component(reranker, "Reranker", "reranker.py", "Stage 2c · LLM relevance scoring of retrieved chunks.")
+
+    ' BOTTOM LAYER (Core Adapters)
+    Component(llm_client, "LLM API Client", "lm_studio_utils.py", "Handles API requests, VRAM limits, and dynamic loading. /keepalive-connection-reuse-session")
+    Component(db_adapter, "Database Adapter", "db_utils.py", "Manages connection pooling, hybrid search, and batch inserts.")
+    Component(eval_utils, "Eval Utilities", "eval_utils.py", "LMStudioJudge + Jaccard lexical overlap metric.")
+
+    ' Invisible constraints to force a clean grid
+    Lay_R(eval_engine, ingest)
+    Lay_D(eval_engine, guardrails)
+    Lay_D(guardrails, rag_orch)
+    Lay_D(rag_orch, retriever)
+    Lay_R(retriever, reranker)
+    Lay_D(retriever, llm_client)
+    Lay_D(eval_utils, llm_client)
+    Lay_D(reranker, db_adapter)
+    Lay_D(retriever, reranker)
+    Lay_D(golden_set, eval_engine)
+}
+
+System_Ext(lmstudio, "LM Studio Server", "C++ / llama.cpp", "Hosts local models")
+SystemDb_Ext(pgvector, "PostgreSQL (PGVector)", "Relational & Vector DB", "Stores chunks and vectors")
+
+' Pin external elements (must be declared after the boundary)
+Lay_R(eval_engine, mlflow)
+Lay_D(db_adapter, pgvector)
+Lay_R(llm_client, lmstudio)
+
+' --- RELATIONSHIPS ---
+
+' 1. Evaluation & Ingestion Flow (From the top)
+Rel_D(eval_engine, golden_set, "Reads queries & expected answers")
+Rel_D(eval_engine, mlflow, "Logs runs")
+Rel_D(eval_engine, guardrails, "Feeds Golden Set")
+Rel_D(eval_engine, eval_utils, "Scores with judge/metrics")
+Rel_D(eval_engine, llm_client, "Loads judge model")
+
+Rel_D(ingest, db_adapter, "Saves chunks")
+Rel_D(ingest, llm_client, "Embeds chunks")
+
+' 2. Guardrails Flow
+Rel_D(guardrails, rag_orch, "Triggers if safe")
+Rel_D(guardrails, llm_client, "Checks Intent")
+
+' 3. RAG & Retrieval Flow
+Rel_D(rag_orch, retriever, "Requests context")
+Rel_D(rag_orch, llm_client, "Generates answer")
+
+Rel_D(retriever, db_adapter, "Fetches chunks")
+Rel_D(retriever, reranker, "Re-ranks chunks")
+Rel_D(retriever, llm_client, "Embeds query")
+
+Rel_D(reranker, llm_client, "Scores chunks")
+
+' 4. Eval Utilities Flow
+Rel_D(eval_utils, llm_client, "Wraps LM Studio")
+
+' 5. External Infrastructure Flow
+Rel_D(llm_client, lmstudio, "API Calls")
+Rel_D(db_adapter, pgvector, "Reads/Writes")
+
+@enduml
