@@ -6,6 +6,7 @@ generation calls through LM Studio, and a pure-Python lexical overlap metric
 """
 
 import asyncio
+import re
 from typing import Any
 
 from deepeval.metrics import BaseMetric
@@ -151,12 +152,17 @@ class NLPLexicalOverlapMetric(BaseMetric):
         expected = test_case.expected_output or ""
         actual = test_case.actual_output or ""
 
-        # Convert to Bag of Words (lowercase, split by spaces)
-        expected_words = set(expected.lower().split())
-        actual_words = set(actual.lower().split())
+        expected_clean = re.sub(r"[^\w\s]", "", expected).lower()
+        actual_clean = re.sub(r"[^\w\s]", "", actual).lower()
 
-        if not expected_words or not actual_words:
-            self.score = 0.0
+        expected_words = set(expected_clean.split())
+        actual_words = set(actual_clean.split())
+
+        # Handle edge cases for empty sets
+        if not expected_words and not actual_words:
+            self.score = 1.0  # Both empty = perfect match
+        elif not expected_words or not actual_words:
+            self.score = 0.0  # Only one empty = no match
         else:
             # Jaccard Similarity: (Intersection) / (Union)
             intersection = expected_words & actual_words

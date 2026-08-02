@@ -67,7 +67,7 @@ class EvalConfig:
     judge_model: str = os.getenv("JUDGE_MODEL", "deepseek-ai_deepseek-r1-0528-qwen3-8b")
     embedding_model: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
     temperatures: tuple[float, ...] = (0.0, 1.0, 2.0)
-    experiment_name: str = "NLPG_RAG_Evaluation"
+    experiment_name: str = "NLPG_RAG_Evaluation_Final"
 
     @property
     def models(self) -> tuple[str, ...]:
