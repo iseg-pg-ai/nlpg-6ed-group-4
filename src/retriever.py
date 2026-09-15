@@ -1,0 +1,137 @@
+"""Hybrid retrieval over pgvector.
+
+**Cycle role — Stage 2 of 4 (RETRIEVE).** Retrieves the most relevant document
+chunks for a query by combining vector-cosine search with full-text search, with
+an optional LLM-based re-ranking pass. Results are cached per
+``(query, retrieval_top_k, rerank_top_k, rerank_model)``.
+
+Consumes the corpus written by INGEST (``ingest.py``) and feeds the context used
+by GUARDRAILS/RAG (``guardrails.py``/``rag.py``) and EVALUATE (``evaluate.py``).
+"""
+
+import os
+from dataclasses import dataclass, field
+
+import psycopg
+from dotenv import load_dotenv
+
+import helpers.db_utils as db
+from helpers.lm_studio_utils import LMStudioModelEmbedder
+from reranker import rerank
+
+load_dotenv(override=True)  # Load environment variables
+
+_RETRIEVAL_CACHE: dict[str, list[str]] = {}
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RetrieverConfig:
+    """Immutable, slot-optimized configuration for the retriever stage.
+
+    Attributes:
+        embedding_model_name: Model used to embed the query before searching.
+        retrieval_top_k: Number of chunks fetched from the database before
+            any re-ranking.
+        rerank_top_k: Number of chunks returned after re-ranking; also the
+            cap applied when no re-ranker model is configured.
+    """
+
+    embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-nomic-embed-text-v1.5")
+    retrieval_top_k: int = field(default_factory=lambda: int(os.getenv("RETRIEVAL_TOP_K", "10")))
+    rerank_top_k: int = field(default_factory=lambda: int(os.getenv("RERANK_TOP_K", "3")))
+
+
+def retrieve_context(
+    query: str,
+    retrieval_k: int | None = None,
+    rerank_k: int | None = None,
+    config: RetrieverConfig | None = None,
+    rerank_model: str | None = None,
+) -> list[str]:
+    """Retrieve the most relevant document chunks for a query.
+
+    Embeds the query, runs a hybrid vector + full-text search, optionally
+    re-ranks the results with an LLM, and returns the top chunks. Results are
+    cached keyed by ``query:retrieval_top_k:rerank_top_k:rerank_model``.
+
+    Args:
+        query: The user query to search for.
+        retrieval_k: Number of chunks to fetch from the database; defaults to
+            ``config.retrieval_top_k``.
+        rerank_k: Number of chunks to return after re-ranking; defaults to
+            ``config.rerank_top_k``.
+        config: Retriever settings; uses environment-derived defaults if None.
+        rerank_model: If provided, re-rank results with this LLM model.
+
+    Returns:
+        A list of chunk contents, most relevant first. Empty on database failure.
+
+    Raises:
+        psycopg.Error: If the hybrid search query itself fails.
+
+    Pipeline trace: called by :func:`rag.ask_rag` for every generation; runs
+    once per query inside the evaluation loop (``evaluate.py``).
+    """
+
+    cfg = config or RetrieverConfig()
+    limit_retrieval = retrieval_k if retrieval_k is not None else cfg.retrieval_top_k
+    limit_rerank = rerank_k if rerank_k is not None else cfg.rerank_top_k
+    cache_key = f"{query}:{limit_retrieval}:{limit_rerank}:{rerank_model}"
+
+    if cache_key in _RETRIEVAL_CACHE:
+        return _RETRIEVAL_CACHE[cache_key]
+
+    # STAGE 2a: QUERY EMBEDDING — project the query into the same vector space
+    # that INGEST used, so cosine distance is meaningful.
+    embedder = LMStudioModelEmbedder(cfg.embedding_model_name)
+    query_embedding = embedder.embed(query)
+
+    # STAGE 2b: HYBRID SEARCH — RRF fusion of vector + full-text results against
+    # the chunks persisted by INGEST.
+    try:
+        with db.get_db_connection() as conn, conn.cursor() as cur:
+            results = db.search_chunks_hybrid(cur, query_embedding, query, limit_retrieval)
+    except psycopg.Error as err:
+        print(f"[ERROR] Database failure during context retrieval: {err}")
+        results = []
+
+    # STAGE 2c: RE-RANK (optional) — an LLM re-scores the fused chunks to lift
+    # the most relevant context to the top before it reaches the generator.
+    if results:
+        if rerank_model:
+            results = rerank(query, results, rerank_model, top_k=limit_rerank)
+        else:
+            results = results[:limit_rerank]
+
+    _RETRIEVAL_CACHE[cache_key] = results
+    return results
+
+
+def clear_cache() -> None:
+    """Clear all cached retrieval results."""
+    _RETRIEVAL_CACHE.clear()
+
+
+def retrieval_test(test_query: str, config: RetrieverConfig | None = None) -> None:
+    """Run an interactive retrieval test that prints the top contexts.
+
+    Args:
+        test_query: The query to test with.
+        config: Retriever settings; uses environment-derived defaults if None.
+    """
+    cfg = config or RetrieverConfig()
+
+    embedder = LMStudioModelEmbedder(cfg.embedding_model_name)
+    embedder.load()
+
+    print(f"Searching for {test_query!r}...")
+
+    results = retrieve_context(test_query, config=cfg)
+
+    print("\n--- Top Retrieved Contexts ---")
+    for i, res in enumerate(results, 1):
+        print(f"\n[Result {i}]:\n{res}")
+
+
+if __name__ == "__main__":
+    retrieval_test("What is the main topic of the text?")

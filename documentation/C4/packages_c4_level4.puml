@@ -1,0 +1,49 @@
+@startuml packages_c4_level4
+set namespaceSeparator none
+skinparam class {
+    BackgroundColor LightBlue
+    ArrowColor DarkSlateGray
+    BorderColor DarkBlue
+}
+
+package "src.__main__" as src.__main__ {
+}
+package "src.evaluate" as src.evaluate {
+}
+package "src.golden_set" as src.golden_set {
+}
+package "src.guardrails" as src.guardrails {
+}
+package "src.helpers" as src.helpers {
+}
+package "src.helpers.db_utils" as src.helpers.db_utils {
+}
+package "src.helpers.eval_utils" as src.helpers.eval_utils {
+}
+package "src.helpers.lm_studio_utils" as src.helpers.lm_studio_utils {
+}
+package "src.ingest" as src.ingest {
+}
+package "src.rag" as src.rag {
+}
+package "src.reranker" as src.reranker {
+}
+package "src.retriever" as src.retriever {
+}
+src.__main__ --> src.evaluate
+src.__main__ --> src.ingest
+src.evaluate --> src.golden_set
+src.evaluate --> src.guardrails
+src.evaluate --> src.helpers.eval_utils
+src.evaluate --> src.helpers.lm_studio_utils
+src.guardrails --> src.helpers.lm_studio_utils
+src.guardrails --> src.rag
+src.ingest --> src.helpers.db_utils
+src.ingest --> src.helpers.lm_studio_utils
+src.rag --> src.helpers.lm_studio_utils
+src.rag --> src.retriever
+src.reranker --> src.helpers.lm_studio_utils
+src.retriever --> src.helpers.db_utils
+src.retriever --> src.helpers.lm_studio_utils
+src.retriever --> src.reranker
+@enduml

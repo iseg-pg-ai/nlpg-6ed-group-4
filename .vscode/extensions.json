@@ -6,6 +6,8 @@
         "ms-python.vscode-python-envs",
         "KevinRose.vsc-python-indent",
         "cstrap.python-snippets",
-        "charliermarsh.ruff"
+        "charliermarsh.ruff",
+        "ItamarAri.colang-formatter",
+        "jebbs.plantuml"
     ]
 }
